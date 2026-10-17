@@ -101,6 +101,7 @@ export class JellyfinClient {
           try: async () => {
             const response = await fetch(url, {
               ...options,
+              redirect: "error",
               headers: { ...headers, ...(options.headers as Record<string, string>) },
               signal: controller.signal,
               // `dispatcher` is an undici-specific fetch option not in the lib.dom
@@ -168,10 +169,13 @@ export class JellyfinClient {
     if (error instanceof JellyfinTimeoutError) {
       return new Error(`Request to ${error.path} timed out after ${error.timeout}ms`);
     }
-    if (error instanceof JellyfinParseError || error instanceof JellyfinTransportError) {
-      return error.cause instanceof Error ? error.cause : new Error(String(error.cause));
+    if (error instanceof JellyfinParseError) {
+      return new Error("Jellyfin returned invalid JSON");
     }
-    return new Error(String(error));
+    if (error instanceof JellyfinTransportError) {
+      return new Error("Unable to connect to Jellyfin");
+    }
+    return new Error("Jellyfin request failed");
   }
 
   // ── System ────────────────────────────────────────────────────────────────
@@ -307,8 +311,23 @@ export class JellyfinClient {
     return this.request<Item[]>(`/Items/Latest?${params.toString()}`);
   }
 
-  async getItem(itemId: string): Promise<Item> {
-    return this.request<Item>(`/Items/${encodeURIComponent(itemId)}`);
+  async getItem(itemId: string, userId: string): Promise<Item> {
+    const encodedItemId = encodeURIComponent(itemId);
+    const params = new URLSearchParams({ userId });
+    try {
+      return await this.request<Item>(`/Items/${encodedItemId}?${params.toString()}`);
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+      try {
+        return await this.request<Item>(
+          `/Users/${encodeURIComponent(userId)}/Items/${encodedItemId}`,
+        );
+      } catch (fallbackError) {
+        throw isNotFoundError(fallbackError) ? error : fallbackError;
+      }
+    }
   }
 
   // ── Discovery (Resume / NextUp / Similar) ─────────────────────────────────

@@ -146,7 +146,7 @@ function hydrateExplicitItems(
     for (const itemId of uniqueIds(itemIds)) {
       try {
         const [item, userData] = await Promise.all([
-          client.getItem(itemId),
+          client.getItem(itemId, userId),
           client.getItemUserData(userId, itemId),
         ]);
         items.push({ ...item, UserData: userData ?? item.UserData });
@@ -189,21 +189,23 @@ function clearItems(
   userId: string,
   items: Item[],
 ): Effect.Effect<ClearResult, never, never> {
-  return Effect.promise(async () => {
-    const results = await Promise.all(items.map(async (item) => {
+  return Effect.forEach(
+    items,
+    (item) => Effect.promise(async () => {
       try {
         await client.clearPlaybackPosition(userId, item.Id, item.UserData);
         return { cleared: item };
       } catch (error) {
         return { failed: { item, error: errorMessage(error) } };
       }
-    }));
-
-    return {
+    }),
+    { concurrency: 4 },
+  ).pipe(
+    Effect.map((results) => ({
       cleared: results.flatMap((result) => (result.cleared ? [result.cleared] : [])),
       failed: results.flatMap((result) => (result.failed ? [result.failed] : [])),
-    };
-  });
+    })),
+  );
 }
 
 function clearResultPayload(
@@ -516,7 +518,7 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
           );
         }
 
-        const item = yield* fromPromise(() => client.getItem(itemId));
+        const item = yield* fromPromise(() => client.getItem(itemId, userId));
         const updated = yield* fromPromise(() => client.setPlaybackPosition(
           userId,
           itemId,

@@ -25,6 +25,27 @@ describe("getConfig JELLYFIN_TIMEOUT validation", () => {
     expect(getConfig().timeout).toBe(10_000);
   });
 
+  it.each([
+    ["0.001", 1],
+    ["0.125", 125],
+    ["2147483.647", 2_147_483_647],
+  ])("accepts timer-safe fractional seconds %s", (raw, milliseconds) => {
+    vi.stubEnv("JELLYFIN_TIMEOUT", raw);
+    expect(getConfig().timeout).toBe(milliseconds);
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it.each(["0.000999", "2147483.648", "1e308", "Infinity", "-Infinity", "NaN"])(
+    "defaults and warns for timer-unsafe seconds %s",
+    (raw) => {
+      vi.stubEnv("JELLYFIN_TIMEOUT", raw);
+      expect(getConfig().timeout).toBe(DEFAULT_TIMEOUT_MS);
+      expect(console.error).toHaveBeenCalledExactlyOnceWith(
+        `jellyfin-mcp: invalid JELLYFIN_TIMEOUT "${raw}" (expected a positive number of seconds); using default 30s`,
+      );
+    },
+  );
+
   it("falls back to the default on non-numeric input instead of NaN", () => {
     vi.stubEnv("JELLYFIN_TIMEOUT", "banana");
     expect(getConfig().timeout).toBe(DEFAULT_TIMEOUT_MS);

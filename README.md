@@ -180,7 +180,7 @@ Do not expose this listener directly or change it to a non-loopback bind. For re
 ### Items
 - `jellyfin_search_items` - by name, optional type filter
 - `jellyfin_get_recent_items` - latest added (per-user)
-- `jellyfin_get_item` - full metadata
+- `jellyfin_get_item` - full metadata (requires `userId`)
 - `jellyfin_get_favorite_items` - user's favorite items, with pagination
 
 ### Discovery
@@ -194,7 +194,7 @@ Do not expose this listener directly or change it to a non-loopback bind. For re
 
 ### Tasks & Activity
 - `jellyfin_list_scheduled_tasks`
-- `jellyfin_run_scheduled_task`
+- `jellyfin_run_scheduled_task` (requires `confirm: true`)
 - `jellyfin_get_activity_log`
 
 ## CLI
@@ -209,7 +209,7 @@ jellyctrl libraries
 jellyctrl users
 jellyctrl sessions --active-only
 jellyctrl search "blade runner" --type Movie --limit 5
-jellyctrl item 6e0b...                            # full metadata for one item
+jellyctrl item 6e0b... --user 3f1c...             # full metadata for one item
 jellyctrl recent --user 3f1c... --limit 10
 jellyctrl resume --user 3f1c...                   # Continue Watching, with resume position
 jellyctrl next-up --user 3f1c... --series 9a2d...
@@ -401,7 +401,7 @@ Then point `JELLYFIN_URL` at `http://localhost:8096`. The MCP itself has no SSH 
 - Library scan triggering (per-library or all)
 - User admin: list, create, delete, enable/disable, reset password
 - Activity log queries for recent events
-- Destructive / privileged ops (`restart`, `shutdown`, `delete_user`, `set_user_password`, `quick_connect_authorize`, `jellyfin_clear_continue_watching`, bulk session controls, resume-position writes) require explicit `confirm: true`
+- Destructive / privileged ops (`restart`, `shutdown`, `delete_user`, `set_user_password`, `quick_connect_authorize`, `jellyfin_run_scheduled_task`, `jellyfin_clear_continue_watching`, bulk session controls, resume-position writes) require explicit `confirm: true`
 - Upstream Jellyfin error responses are summarized (status only) before being returned to the client; the full response body is logged to stderr for operators, so internal server detail is not surfaced to the model
 - Works from a shell, cron, CI, Claude Desktop, Claude Code, OpenClaw, Hermes Agent, Codex CLI, and any MCP-compatible client
 

@@ -68,14 +68,17 @@ export function registerItemTools(server: McpServer, client: JellyfinClient): vo
 
   server.tool(
     "jellyfin_get_item",
-    "Get full metadata for a single item by ID. Returns the raw Jellyfin Item object - use this for deep inspection after narrowing via search.",
+    "Get full metadata for a single item by ID. Requires userId because Jellyfin's single-item read is user-scoped for API-key clients. Returns the raw Jellyfin Item object - use this for deep inspection after narrowing via search.",
     {
       itemId: z.string().describe("Item ID from a search or recent-items result"),
+      userId: z
+        .string()
+        .describe("User ID for item visibility/context (Jellyfin requires this). Use jellyfin_list_users to find an appropriate user ID."),
     },
     READ_ONLY,
-    toToolHandler(({ itemId }) =>
+    toToolHandler(({ itemId, userId }) =>
       toolResult(Effect.gen(function* () {
-        const item = yield* fromPromise(() => client.getItem(itemId));
+        const item = yield* fromPromise(() => client.getItem(itemId, userId));
         return ok(item);
       })),
     ),

@@ -42,7 +42,8 @@ export const parseTimeoutSeconds = (
     }
 
     const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed > 0) {
+    const milliseconds = parsed * 1000;
+    if (Number.isFinite(milliseconds) && milliseconds >= 1 && milliseconds <= 2_147_483_647) {
       return parsed;
     }
 

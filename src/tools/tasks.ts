@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import type { JellyfinClient } from "../client.js";
 import { fromPromise, toolResult, toToolHandler } from "../effect/tool-adapter.js";
-import { ok, NON_DESTRUCTIVE, READ_ONLY } from "./_util.js";
+import { ok, refuseUnconfirmed, DESTRUCTIVE, READ_ONLY } from "./_util.js";
 
 export function registerTaskTools(server: McpServer, client: JellyfinClient): void {
   server.tool(
@@ -33,13 +33,15 @@ export function registerTaskTools(server: McpServer, client: JellyfinClient): vo
 
   server.tool(
     "jellyfin_run_scheduled_task",
-    "Trigger a scheduled task to run immediately. Use jellyfin_list_scheduled_tasks to discover IDs.",
+    "Trigger a privileged server scheduled task to run immediately. Requires confirm: true. Use jellyfin_list_scheduled_tasks to discover IDs.",
     {
       taskId: z.string().describe("Task ID from jellyfin_list_scheduled_tasks"),
+      confirm: z.boolean().optional().describe("Must be true to start the scheduled task."),
     },
-    NON_DESTRUCTIVE,
-    toToolHandler(({ taskId }) =>
+    DESTRUCTIVE,
+    toToolHandler(({ taskId, confirm }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed(`run scheduled task ${taskId}`);
         yield* fromPromise(() => client.runScheduledTask(taskId));
         return ok({ result: `task ${taskId} started` });
       })),

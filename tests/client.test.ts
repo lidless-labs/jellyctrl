@@ -42,6 +42,80 @@ describe("JellyfinClient", () => {
     await expect(client.getSystemInfo()).rejects.toThrow(/Invalid API key/);
   });
 
+  it("returns a fixed public parse error without response content or query secrets", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("PRIVATE_RESPONSE_MARKER", { status: 200 }));
+
+    const error = await client.authorizeQuickConnect("PRIVATE_QUERY_MARKER", "u1")
+      .catch((error: unknown) => error);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("Jellyfin returned invalid JSON");
+    expect((error as Error).cause).toBeUndefined();
+    expect((error as Error).stack).not.toContain("PRIVATE_");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    new TypeError("fetch failed: http://jellyfin.test?code=PRIVATE_QUERY_MARKER", {
+      cause: new Error("PRIVATE_CAUSE_MARKER"),
+    }),
+    "PRIVATE_TRANSPORT_MARKER",
+  ])("returns a fixed public transport error for rejection %#", async (cause) => {
+    fetchMock.mockRejectedValueOnce(cause);
+
+    const error = await client.authorizeQuickConnect("PRIVATE_QUERY_MARKER", "u1")
+      .catch((error: unknown) => error);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("Unable to connect to Jellyfin");
+    expect((error as Error).cause).toBeUndefined();
+    expect((error as Error).stack).not.toContain("PRIVATE_");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("redacts transport failures while reading a successful response body", async () => {
+    const response = new Response("", { status: 200 });
+    vi.spyOn(response, "text").mockRejectedValueOnce(new Error("PRIVATE_BODY_READ_MARKER"));
+    fetchMock.mockResolvedValueOnce(response);
+
+    await expect(client.getSystemInfo()).rejects.toThrow("Unable to connect to Jellyfin");
+  });
+
+  it.each(["GET", "POST"])("rejects redirects at the fetch boundary for %s without retrying", async (method) => {
+    fetchMock.mockRejectedValueOnce(new TypeError("fetch failed: unexpected redirect"));
+
+    const request = method === "GET"
+      ? client.getSystemInfo()
+      : client.authorizeQuickConnect("code", "u1");
+    await expect(request).rejects.toBeInstanceOf(Error);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.redirect).toBe("error");
+    expect(init.headers["Authorization"]).toBe('MediaBrowser Token="test-key"');
+    expect(init.method ?? "GET").toBe(method);
+  });
+
+  it("preserves timeout errors and releases the request timer", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementationOnce((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal!.addEventListener("abort", () =>
+            reject(new DOMException("PRIVATE_ABORT_MARKER", "AbortError")),
+          );
+        }),
+      );
+      const error = client.getSystemInfo().catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect((await error as Error).message).toBe("Request to /System/Info timed out after 5000ms");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not leak the raw downstream body into the thrown error", async () => {
     const internal =
       "System.Exception: secret stack trace at /opt/jellyfin/internal/path.cs:42";
@@ -217,6 +291,46 @@ describe("JellyfinClient", () => {
     await expect(client.getItemUserData("u1", "missing")).rejects.toThrow(
       "/UserItems/missing/UserData",
     );
+  });
+
+  it("getItem reads a single item with userId as a query param", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ Id: "item/1", Name: "Movie" }), { status: 200 }),
+    );
+    const result = await client.getItem("item/1", "user/1");
+    const [url] = fetchMock.mock.calls[0];
+    const parsed = new URL(url as string);
+    expect(parsed.pathname).toBe("/Items/item%2F1");
+    expect(parsed.searchParams.get("userId")).toBe("user/1");
+    expect(result.Id).toBe("item/1");
+  });
+
+  it("getItem falls back to the legacy user path on 404", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ Id: "i1", Name: "Legacy" }), { status: 200 }),
+      );
+    const result = await client.getItem("i1", "u1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [fallbackUrl] = fetchMock.mock.calls[1];
+    expect(fallbackUrl).toBe("http://jellyfin.test/Users/u1/Items/i1");
+    expect(result.Name).toBe("Legacy");
+  });
+
+  it("getItem keeps the modern 404 when the legacy fallback also 404s", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response("modern missing", { status: 404 }))
+      .mockResolvedValueOnce(new Response("legacy missing", { status: 404 }));
+    await expect(client.getItem("missing", "u1")).rejects.toThrow(
+      "/Items/missing",
+    );
+  });
+
+  it("getItem does not fall back on HTTP 400", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("needs user context", { status: 400 }));
+    await expect(client.getItem("i1", "u1")).rejects.toThrow(/HTTP 400/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("updateItemUserData POSTs the user data body", async () => {

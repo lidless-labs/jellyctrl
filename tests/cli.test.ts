@@ -52,7 +52,12 @@ describe("parseArgs", () => {
   });
 
   it("parses item and similar positionals", () => {
-    expect(parseArgs(["item", "abc123"])).toEqual({ kind: "item", json: false, itemId: "abc123" });
+    expect(parseArgs(["item", "abc123", "--user", "u1"])).toEqual({
+      kind: "item",
+      json: false,
+      itemId: "abc123",
+      userId: "u1",
+    });
     expect(parseArgs(["similar", "abc123", "--user", "u1", "--limit", "3"])).toEqual({
       kind: "similar",
       json: false,
@@ -121,6 +126,7 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["status", "extra"])).toThrow(UsageError);
     expect(() => parseArgs(["search"])).toThrow(UsageError); // missing query
     expect(() => parseArgs(["item"])).toThrow(UsageError); // missing itemId
+    expect(() => parseArgs(["item", "abc123"])).toThrow(UsageError); // missing --user
     expect(() => parseArgs(["recent"])).toThrow(UsageError); // missing --user
     expect(() => parseArgs(["resume", "--user"])).toThrow(UsageError); // flag without value
     expect(() => parseArgs(["search", "x", "--limit", "9999"])).toThrow(UsageError); // out of range
@@ -173,6 +179,13 @@ describe("run", () => {
     const { out, deps } = capture(client);
     expect(await run(["status", "--json"], deps)).toBe(0);
     expect(JSON.parse(out.join("\n"))).toEqual(payload);
+  });
+
+  it("passes item user context through to the client", async () => {
+    const client = { getItem: vi.fn().mockResolvedValue({ Id: "i1", Name: "Movie", Type: "Movie" }) };
+    const { deps } = capture(client);
+    expect(await run(["item", "i1", "--user", "u1"], deps)).toBe(0);
+    expect(client.getItem).toHaveBeenCalledWith("i1", "u1");
   });
 
   it("passes search options through to the client", async () => {

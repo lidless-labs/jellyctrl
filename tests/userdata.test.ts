@@ -221,6 +221,62 @@ describe("user data tools", () => {
     ]);
   });
 
+  it("bounds clears to four, continues after rejection, and preserves selection order", async () => {
+    const items = Array.from({ length: 8 }, (_, index) => ({
+      Id: `ep-${index + 1}`, Name: `Episode ${index + 1}`, Type: "Episode",
+    }));
+    const pending = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
+    let inFlight = 0;
+    let peakInFlight = 0;
+    const clearPlaybackPosition = vi.fn((_userId: string, itemId: string) => {
+      inFlight += 1;
+      peakInFlight = Math.max(peakInFlight, inFlight);
+      return new Promise<void>((resolve, reject) => {
+        pending.set(itemId, { resolve, reject });
+      }).finally(() => { inFlight -= 1; });
+    });
+    const client = {
+      getResumeItems: vi.fn().mockResolvedValue({ TotalRecordCount: 8, Items: items }),
+      clearPlaybackPosition,
+    } as unknown as JellyfinClient;
+    const { server, tools } = makeFakeServer();
+    registerUserDataTools(server as never, client);
+    const resultPromise = tools.get("jellyfin_clear_continue_watching")!.handler({
+      userId: "user-42", confirm: true,
+    });
+
+    // Finish out of order, with a rejection opening a slot while ep-1 stays pending.
+    await vi.waitFor(() => expect(pending.has("ep-4")).toBe(true));
+    const initialCalls = clearPlaybackPosition.mock.calls.length;
+    pending.get("ep-3")!.reject(new Error("third failed"));
+    await vi.waitFor(() => expect(pending.has("ep-5")).toBe(true));
+    const progressedAfterRejection = inFlight;
+    pending.get("ep-5")!.resolve();
+    await vi.waitFor(() => expect(pending.has("ep-6")).toBe(true));
+    pending.get("ep-6")!.reject(new Error("sixth failed"));
+    await vi.waitFor(() => expect(pending.has("ep-7")).toBe(true));
+    pending.get("ep-7")!.resolve();
+    await vi.waitFor(() => expect(pending.has("ep-8")).toBe(true));
+    for (const id of ["ep-8", "ep-4", "ep-2", "ep-1"]) pending.get(id)!.resolve();
+
+    const result = await resultPromise;
+    expect(initialCalls).toBe(4);
+    expect(peakInFlight).toBe(4);
+    expect(progressedAfterRejection).toBe(4);
+    expect(clearPlaybackPosition.mock.calls.map(([, id]) => id)).toEqual(items.map((item) => item.Id));
+    expect(inFlight).toBe(0);
+    expect(result.isError).toBeUndefined();
+    const payload = parseResult(result);
+    expect(payload).toMatchObject({ partialFailure: true, clearedCount: 6, failedCount: 2 });
+    expect(payload.clearedItems).toEqual(["ep-1", "ep-2", "ep-4", "ep-5", "ep-7", "ep-8"].map(
+      (id) => expect.objectContaining({ id }),
+    ));
+    expect(payload.failedItems).toEqual([
+      expect.objectContaining({ id: "ep-3", error: "third failed" }),
+      expect.objectContaining({ id: "ep-6", error: "sixth failed" }),
+    ]);
+  });
+
   it("applies filters to explicit item IDs", async () => {
     const client = {
       getItem: vi

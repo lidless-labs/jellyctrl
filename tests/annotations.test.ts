@@ -81,6 +81,7 @@ const DESTRUCTIVE_TOOLS = [
   "jellyfin_remove_from_playlist",
   "jellyfin_remove_from_collection",
   "jellyfin_quick_connect_authorize",
+  "jellyfin_run_scheduled_task",
 ];
 
 describe("MCP tool annotations", () => {
