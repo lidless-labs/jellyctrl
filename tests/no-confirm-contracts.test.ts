@@ -3,6 +3,7 @@ import type { JellyfinClient } from "../src/client.js";
 import { registerCollectionTools } from "../src/tools/collections.js";
 import { registerPlaylistTools } from "../src/tools/playlists.js";
 import { registerUserTools } from "../src/tools/users.js";
+import { registerTaskTools } from "../src/tools/tasks.js";
 
 interface CapturedTool {
   name: string;
@@ -34,6 +35,41 @@ function parseResult(result: { content: { text: string }[] }): Record<string, un
 }
 
 describe("destructive tool confirmation gates", () => {
+  describe("jellyfin_run_scheduled_task", () => {
+    it.each([undefined, false])("refuses with confirm %s and makes no client calls", async (confirm) => {
+      const client = {
+        runScheduledTask: vi.fn().mockResolvedValue(undefined),
+      } as unknown as JellyfinClient;
+      const { server, tools } = makeFakeServer();
+      registerTaskTools(server as never, client);
+
+      const result = await tools.get("jellyfin_run_scheduled_task")!.handler({
+        taskId: "task-1",
+        ...(confirm === undefined ? {} : { confirm }),
+      });
+
+      expect(client.runScheduledTask).not.toHaveBeenCalled();
+      expect(result.isError).toBe(true);
+      expect(parseResult(result)).toMatchObject({ error: expect.stringContaining("confirm: true") });
+    });
+
+    it("executes once with explicit confirm true", async () => {
+      const client = {
+        runScheduledTask: vi.fn().mockResolvedValue(undefined),
+      } as unknown as JellyfinClient;
+      const { server, tools } = makeFakeServer();
+      registerTaskTools(server as never, client);
+
+      const result = await tools.get("jellyfin_run_scheduled_task")!.handler({
+        taskId: "task-1", confirm: true,
+      });
+
+      expect(client.runScheduledTask).toHaveBeenCalledExactlyOnceWith("task-1");
+      expect(result.isError).toBeUndefined();
+      expect(parseResult(result)).toEqual({ result: "task task-1 started" });
+    });
+  });
+
   describe("jellyfin_set_user_disabled", () => {
     it("refuses without confirm", async () => {
       const client = {

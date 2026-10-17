@@ -38,7 +38,7 @@ export type Parsed =
   | { kind: "users"; json: boolean }
   | { kind: "sessions"; json: boolean; activeOnly: boolean }
   | { kind: "search"; json: boolean; query: string; types?: string; limit: number }
-  | { kind: "item"; json: boolean; itemId: string }
+  | { kind: "item"; json: boolean; itemId: string; userId: string }
   | { kind: "recent"; json: boolean; userId: string; limit: number }
   | { kind: "resume"; json: boolean; userId: string; limit: number }
   | { kind: "next-up"; json: boolean; userId: string; seriesId?: string; limit: number }
@@ -67,7 +67,7 @@ Users & sessions:
 
 Content:
   search <query>             Search the library by name
-  item <itemId>              Full metadata for one item
+  item <itemId> --user <id>  Full metadata for one item
   recent --user <id>         Recently added items (per-user 'latest' view)
 
 Per-user discovery & history:
@@ -193,9 +193,10 @@ export function parseArgs(argv: string[]): Parsed {
       return { kind: "search", json, query, types, limit };
     }
     case "item": {
+      const userId = requireOption(args, "--user");
       const itemId = takePositional(args, "<itemId>");
       ensureNoExtra(args);
-      return { kind: "item", json, itemId };
+      return { kind: "item", json, itemId, userId };
     }
     case "recent": {
       const userId = requireOption(args, "--user");
@@ -487,7 +488,7 @@ function dispatch(
         return emit(r, () => renderItemRows(r.Items, r.TotalRecordCount), parsed.json);
       }
       case "item": {
-        const r = yield* fromPromise(() => client.getItem(parsed.itemId));
+        const r = yield* fromPromise(() => client.getItem(parsed.itemId, parsed.userId));
         return emit(r, () => renderItemRows([r], undefined), parsed.json);
       }
       case "recent": {

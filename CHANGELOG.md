@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Continue Watching clears run at most four operations concurrently, preserve
+  selection order, and report all successes and failures.
+- `JELLYFIN_TIMEOUT` values outside the 1 to 2147483647 millisecond timer range
+  warn and use the 30s default. Valid fractional seconds remain supported.
+
+### Security
+
+- `jellyfin_run_scheduled_task` requires `confirm: true` and carries a
+  destructive annotation before starting a privileged server task.
+- Public parse and transport errors use fixed messages without downstream
+  response content, query secrets, or raw causes.
+- Client requests reject redirects to prevent forwarding the API token.
+  Configure the final Jellyfin server URL.
+
 ### Added
 
 - `jellyfin_get_favorite_items` — user's favorite items, with optional type
@@ -17,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `jellyfin_get_item` requires `userId`, and CLI `jellyctrl item <itemId>`
+  requires `--user <id>` for user-scoped item visibility and state.
 - README rewritten to the adoption-upgrade standard: a what / why / how-it-differs
   lead, an npm version and CI badge, a prominent Website link, a copyable
   `npx -y jellyfin-mcp` MCP client config, a keyword-rich "What it does" section,
