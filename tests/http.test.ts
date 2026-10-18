@@ -11,11 +11,14 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { captureRegisteredToolNames } from "../src/server.js";
 import { Readable } from "node:stream";
 import { EventEmitter } from "node:events";
+import { createServer } from "node:http";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const env = {
   JELLYFIN_URL: "http://jellyfin.invalid:8096",
-  JELLYFIN_API_KEY: "jellyfin-api-key-must-not-leak",
-  JELLYFIN_MCP_HTTP_TOKEN: "independent-http-token",
+  JELLYFIN_API_KEY: "jellyfin-api-key-must-not-leak-".repeat(2),
+  JELLYFIN_MCP_HTTP_TOKEN: "independent-http-token-".repeat(2),
 };
 
 class FakeResponse extends EventEmitter {
@@ -40,12 +43,14 @@ class FakeResponse extends EventEmitter {
 
 async function request(
   handler: ReturnType<typeof createHttpRequestHandler>,
-  options: { method: string; url: string; authorization?: string; body?: string },
+  options: { method: string; url: string; authorization?: string; body?: string; host?: string | null; origin?: string },
 ): Promise<FakeResponse> {
   const req = Object.assign(Readable.from([options.body ?? ""]), {
     method: options.method,
     url: options.url,
     headers: {
+      ...(options.host === null ? {} : { host: options.host ?? "127.0.0.1" }),
+      ...(options.origin === undefined ? {} : { origin: options.origin }),
       ...(options.authorization ? { authorization: options.authorization } : {}),
       ...(options.body ? { "content-length": String(Buffer.byteLength(options.body)) } : {}),
     },
@@ -84,7 +89,7 @@ describe("HTTP transport configuration", () => {
     });
   });
 
-  it.each(["localhost", "0.0.0.0", "192.0.2.1", "[::1]"])(
+  it.each(["localhost", "0.0.0.0", "::", "[::]", "192.0.2.1", "[::1]"])(
     "rejects non-loopback host %s",
     (host) => {
       vi.stubEnv("JELLYFIN_MCP_HTTP_HOST", host);
@@ -98,6 +103,11 @@ describe("HTTP transport configuration", () => {
     vi.stubEnv("JELLYFIN_MCP_HTTP_PORT", "3000");
     vi.stubEnv("JELLYFIN_MCP_REMOTE_MODE", "unsafe");
     expect(() => getHttpConfig()).toThrow("JELLYFIN_MCP_REMOTE_MODE");
+  });
+
+  it("refuses a token shorter than 32 characters", () => {
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN", "a".repeat(31));
+    expect(() => getHttpConfig()).toThrow(/at least 32 characters/);
   });
 
   it("requires an independent HTTP token", () => {
@@ -147,6 +157,56 @@ describe("HTTP transport", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    { origin: "https://evil.example.com" },
+    { host: "evil.example.com" },
+    { host: null },
+  ])("rejects rebinding headers before authentication: %j", async (headers) => {
+    const handler = createHttpRequestHandler(getHttpConfig());
+    const result = await request(handler, { method: "POST", url: "/mcp", ...headers });
+    expect(result.status).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({ error: "Forbidden" });
+  });
+
+  it("accepts a loopback Origin", async () => {
+    const handler = createHttpRequestHandler(getHttpConfig());
+    const result = await request(handler, { method: "POST", url: "/mcp", origin: "http://localhost" });
+    expect(result.status).toBe(401);
+  });
+
+  it("checks Host before serving healthz", async () => {
+    const handler = createHttpRequestHandler(getHttpConfig());
+    const result = await request(handler, { method: "GET", url: "/healthz", host: "evil.example.com" });
+    expect(result.status).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({ error: "Forbidden" });
+  });
+
+  it("authenticates a padded token and lists tools using the SDK client", async () => {
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN", `  ${env.JELLYFIN_MCP_HTTP_TOKEN}\n`);
+    const server = createServer(createHttpListener(createHttpRequestHandler(getHttpConfig())));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const client = new Client({ name: "http-test", version: "1" });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("No HTTP port");
+      const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`), {
+        requestInit: { headers: { authorization: `Bearer ${env.JELLYFIN_MCP_HTTP_TOKEN}` } },
+      });
+      await client.connect(transport);
+      expect((await client.listTools()).tools.some((tool) => tool.name === "jellyfin_get_status")).toBe(true);
+      expect(transport.sessionId).toBeUndefined();
+    } finally {
+      await client.close();
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("checks the trimmed token against the Jellyfin API key", () => {
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN", `  ${env.JELLYFIN_API_KEY}\n`);
+    expect(() => createHttpRequestHandler(getHttpConfig())).toThrow(/must differ from JELLYFIN_API_KEY/);
+  });
+
   it("protects MCP, limits routes and bodies, and keeps healthz minimal", async () => {
     const handler = createHttpRequestHandler(getHttpConfig());
     const health = await request(handler, { method: "GET", url: "/healthz" });
@@ -182,7 +242,7 @@ describe("HTTP transport", () => {
   });
 
   it("rejects a handler configuration that reuses the Jellyfin API key", () => {
-    const token = "same-secret-value";
+    const token = "same-secret-value-".repeat(2);
     const jellyfinConfig: JellyfinConfig = {
       url: env.JELLYFIN_URL,
       apiKey: token,

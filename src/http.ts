@@ -12,6 +12,7 @@ import {
 import { createMcpServerResource, type McpServerResource } from "./server.js";
 
 export const MAX_HTTP_BODY_BYTES = 1_048_576;
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 type ToolPolicy = "read" | "routine" | "high-impact";
 
@@ -81,6 +82,29 @@ export function isToolAllowed(mode: RemoteMode, name: string): boolean {
   if (mode === "full") return true;
   if (mode === "managed") return policy !== "high-impact";
   return policy === "read";
+}
+
+function validHost(value: string | undefined, boundHost: string): boolean {
+  if (!value) return false;
+  try {
+    const url = new URL(`http://${value}`);
+    // Require an authority only, without userinfo, paths, whitespace or URL normalization tricks.
+    if (!/^(\[[a-f\d:]+\]|[a-z\d.-]+)(:\d+)?$/i.test(value)) return false;
+    return LOOPBACK_HOSTS.has(url.hostname) || url.hostname === (boundHost.includes(":") ? `[${boundHost}]` : boundHost).toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+function validOrigin(value: string | undefined): boolean {
+  if (value === undefined) return true;
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") &&
+      url.origin === value && LOOPBACK_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function tokenMatches(authorization: string | undefined, token: string): boolean {
@@ -183,6 +207,10 @@ export function createHttpRequestHandler(
 ): HttpRequestHandler {
   assertIndependentHttpToken(config, jellyfinConfig);
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    if (!validHost(request.headers.host, config.host) || !validOrigin(request.headers.origin)) {
+      sendJson(response, 403, { error: "Forbidden" });
+      return;
+    }
     const path = originFormPath(request.url);
     if (path === undefined) {
       sendJson(response, 400, { error: "Bad request" });
