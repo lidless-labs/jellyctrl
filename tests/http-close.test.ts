@@ -23,7 +23,7 @@ describe("HTTP transport lifecycle", () => {
   beforeEach(() => {
     vi.stubEnv("JELLYFIN_URL", "http://jellyfin.invalid:8096");
     vi.stubEnv("JELLYFIN_API_KEY", "test-key");
-    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN", "test-http-token");
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN", "test-http-token-".repeat(3));
   });
 
   afterEach(() => {

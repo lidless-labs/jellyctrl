@@ -98,16 +98,20 @@ Set a separate bearer token. Do not reuse `JELLYFIN_API_KEY` for this token.
 ```bash
 export JELLYFIN_URL=http://192.0.2.10:8096
 export JELLYFIN_API_KEY=your-jellyfin-api-key
-export JELLYFIN_MCP_HTTP_TOKEN=replace-with-a-long-random-token
+export JELLYFIN_MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
 jellyfin-mcp-http
 ```
 
 The HTTP listener defaults to `127.0.0.1:3000`. Its configuration is intentionally strict:
 
-- `JELLYFIN_MCP_HTTP_HOST` is `127.0.0.1` by default and may only be `127.0.0.1` or `::1`.
-- `JELLYFIN_MCP_HTTP_PORT` is `3000` by default and must be an integer from 1 to 65535.
-- `JELLYFIN_MCP_HTTP_TOKEN` is required. Send it as `Authorization: Bearer <token>`.
-- `JELLYFIN_MCP_REMOTE_MODE` defaults to `observe`. It is fixed at process startup and cannot be changed by an MCP request.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `JELLYFIN_MCP_HTTP_HOST` | `127.0.0.1` | Loopback bind, only `127.0.0.1` or `::1`. Wildcards are refused |
+| `JELLYFIN_MCP_HTTP_PORT` | `3000` | TCP port, an integer from 1 to 65535 |
+| `JELLYFIN_MCP_HTTP_TOKEN` | Required | Independent bearer token, at least 32 characters after trimming whitespace. Send as `Authorization: Bearer <token>` |
+| `JELLYFIN_MCP_REMOTE_MODE` | `observe` | Tool policy fixed at process startup, never changed by an MCP request |
+
+Host and Origin checks run before `/healthz` and authentication. Host must identify a loopback alias or the bound host. Origin may be absent or an exact HTTP(S) loopback origin. Invalid headers receive 403 Forbidden.
 
 Remote modes provide a second server-side control in addition to each tool's existing `confirm: true` requirement:
 

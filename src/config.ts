@@ -71,10 +71,12 @@ export function getHttpConfig(): HttpConfig {
   }
   const port = Number(rawPort);
   if (port > 65535) throw new Error("JELLYFIN_MCP_HTTP_PORT must be an integer from 1 to 65535");
-  const token = process.env.JELLYFIN_MCP_HTTP_TOKEN;
-  if (typeof token !== "string" || token.trim().length === 0) {
+  // Header values arrive trimmed, so compare against the trimmed secret.
+  const token = (process.env.JELLYFIN_MCP_HTTP_TOKEN ?? "").trim();
+  if (!token) {
     throw new Error("JELLYFIN_MCP_HTTP_TOKEN environment variable is required");
   }
+  if (token.length < 32) throw new Error("JELLYFIN_MCP_HTTP_TOKEN must be at least 32 characters (e.g. openssl rand -hex 32)");
   const remoteMode = process.env.JELLYFIN_MCP_REMOTE_MODE ?? "observe";
   if (remoteMode !== "observe" && remoteMode !== "managed" && remoteMode !== "full") {
     throw new Error("JELLYFIN_MCP_REMOTE_MODE must be observe, managed, or full");
