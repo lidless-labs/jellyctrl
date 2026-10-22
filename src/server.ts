@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { JellyfinConfig } from "./config.js";
 import { JellyfinClient } from "./client.js";
+import { registerAccessTools } from "./tools/access.js";
 import { registerCollectionTools } from "./tools/collections.js";
 import { registerDiscoveryTools } from "./tools/discovery.js";
 import { registerItemTools } from "./tools/items.js";
@@ -24,6 +25,7 @@ export interface McpServerResource {
 
 export function registerAllTools(server: McpServer, client: JellyfinClient): void {
   registerSystemTools(server, client);
+  registerAccessTools(server, client);
   registerLibraryTools(server, client);
   registerUserTools(server, client);
   registerSessionTools(server, client);

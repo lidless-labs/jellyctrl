@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `jellyfin_get_user` reads one user's password status, login/activity timestamps,
   and selected policy fields. Missing values return `null`. HTTP `observe` mode
   permits this read-only tool. The MCP surface now has 58 tools.
+- `jellyfin_list_api_keys` and `jellyfin_list_devices` for read-only access
+  inventory, with optional device filtering by user ID. Results include only
+  inventory metadata and omit access tokens. Device output defaults to 50 rows.
+  Both tools support HTTP observe mode. The MCP surface now has 61 tools.
 
 - `jellyfin_get_favorite_items` — user's favorite items, with optional type
   filtering and pagination.
