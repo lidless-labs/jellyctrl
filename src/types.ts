@@ -96,12 +96,27 @@ export interface ItemsResponse {
   StartIndex?: number;
 }
 
+export interface ActivityLogOptions {
+  startIndex?: number;
+  limit?: number;
+  minDate?: string;
+  maxDate?: string;
+  hasUserId?: boolean;
+  username?: string;
+  severity?: "Trace" | "Debug" | "Information" | "Warning" | "Error" | "Critical" | "None";
+  type?: string;
+  name?: string;
+  sortBy?: string;
+  sortOrder?: "Ascending" | "Descending";
+}
+
 export interface ActivityLogEntry {
   Id: number;
   Name: string;
   Type: string;
   Date: string;
   Severity: string;
+  ItemId?: string;
   UserId?: string;
   ShortOverview?: string;
   Overview?: string;
@@ -111,6 +126,7 @@ export interface ActivityLogEntry {
 export interface ActivityLogResponse {
   Items: ActivityLogEntry[];
   TotalRecordCount: number;
+  StartIndex?: number;
 }
 
 export interface ScheduledTask {

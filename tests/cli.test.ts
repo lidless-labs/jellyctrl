@@ -195,6 +195,14 @@ describe("run", () => {
     expect(client.searchItems).toHaveBeenCalledWith("the wire", "Series", 7);
   });
 
+  it("passes existing activity flags through the options signature", async () => {
+    const client = { getActivityLog: vi.fn().mockResolvedValue({ Items: [], TotalRecordCount: 0 }) };
+    const { out, deps } = capture(client);
+    expect(await run(["activity", "--limit", "50", "--min-date", "2026-01-01T00:00:00Z", "--json"], deps)).toBe(0);
+    expect(client.getActivityLog).toHaveBeenCalledWith({ limit: 50, minDate: "2026-01-01T00:00:00Z" });
+    expect(JSON.parse(out.join("\n"))).toEqual({ Items: [], TotalRecordCount: 0 });
+  });
+
   it("filters sessions to active-only without touching the server", async () => {
     const sessions = [
       { Id: "s1", NowPlayingItem: { Id: "i1", Name: "X", Type: "Movie" } },
