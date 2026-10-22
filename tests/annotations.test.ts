@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { assertToolAnnotations, type ToolAnnotations } from "@lidless-labs/effect-operator-kit";
 import type { JellyfinClient } from "../src/client.js";
+import { DESTRUCTIVE, NON_DESTRUCTIVE, READ_ONLY } from "../src/tools/_util.js";
 import { registerSystemTools } from "../src/tools/system.js";
 import { registerLibraryTools } from "../src/tools/libraries.js";
 import { registerUserTools } from "../src/tools/users.js";
@@ -15,7 +17,7 @@ import { registerQuickConnectTools } from "../src/tools/quickconnect.js";
 // Fake McpServer that records the annotations each tool registers with. Tool
 // registration is positional: (name, description, schema, annotations, handler).
 interface Captured {
-  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+  annotations?: ToolAnnotations;
 }
 
 function captureAllTools(): Map<string, Captured> {
@@ -125,5 +127,15 @@ describe("MCP tool annotations", () => {
         destructiveHint: false,
       });
     }
+  });
+
+  it("sets every hint explicitly and passes the kit annotation audit", () => {
+    assertToolAnnotations(new Map([...tools].map(([name, tool]) => [name, tool.annotations])));
+  });
+
+  it("keeps the three-tier meaning through the kit helper", () => {
+    expect(READ_ONLY).toMatchObject({ readOnlyHint: true, destructiveHint: false, idempotentHint: true });
+    expect(NON_DESTRUCTIVE).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(DESTRUCTIVE).toMatchObject({ readOnlyHint: false, destructiveHint: true });
   });
 });

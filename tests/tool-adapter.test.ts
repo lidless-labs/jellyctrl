@@ -48,3 +48,33 @@ describe("tool error contracts", () => {
     });
   });
 });
+
+describe("tool result byte cap", () => {
+  it("truncates an oversize success result with the kit marker", async () => {
+    const client = {
+      listPlaylists: vi.fn().mockResolvedValue({ Items: [{ Name: "é".repeat(80_000) }], TotalRecordCount: 1 }),
+    } as unknown as JellyfinClient;
+    const { server, tools } = makeFakeServer();
+    registerPlaylistTools(server as never, client);
+
+    const result = await tools.get("jellyfin_list_playlists")!.handler({ userId: "u1" });
+
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(90_000);
+    expect(result.content[0].text).toContain("[truncated: output was");
+    expect(result).not.toHaveProperty("details");
+  });
+
+  it("truncates an oversize error result and keeps isError", async () => {
+    const client = {
+      listPlaylists: vi.fn().mockRejectedValue(new Error("x".repeat(200_000))),
+    } as unknown as JellyfinClient;
+    const { server, tools } = makeFakeServer();
+    registerPlaylistTools(server as never, client);
+
+    const result = await tools.get("jellyfin_list_playlists")!.handler({ userId: "u1" });
+
+    expect(result.isError).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(90_000);
+    expect(result.content[0].text).toContain("[truncated: output was");
+  });
+});
