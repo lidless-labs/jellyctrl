@@ -116,7 +116,7 @@ export interface ActivityLogEntry {
   Type: string;
   Date: string;
   Severity: string;
-  ItemId?: string;
+  ItemId?: string | null;
   UserId?: string;
   ShortOverview?: string;
   Overview?: string;
