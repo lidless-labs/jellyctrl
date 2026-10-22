@@ -18,6 +18,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
+    "audit:prod": "node scripts/audit-prod.mjs",
     "prepublishOnly": "npm test && npm run build",
     "typecheck": "tsc --noEmit"
   },
