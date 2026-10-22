@@ -208,6 +208,10 @@ export class JellyfinClient {
     return this.request<User[]>("/Users");
   }
 
+  async getUser(userId: string): Promise<User> {
+    return this.request<User>(`/Users/${encodeURIComponent(userId)}`);
+  }
+
   async createUser(name: string): Promise<User> {
     return this.request<User>("/Users/New", {
       method: "POST",

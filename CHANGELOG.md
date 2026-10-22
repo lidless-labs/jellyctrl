@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `jellyfin_get_user` reads one user's password status, login/activity timestamps,
+  and selected policy fields. Missing values return `null`. HTTP `observe` mode
+  permits this read-only tool. The MCP surface now has 58 tools.
+
 - `jellyfin_get_favorite_items` — user's favorite items, with optional type
   filtering and pagination.
 - Maintainer health files: `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,

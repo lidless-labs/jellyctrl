@@ -29,6 +29,46 @@ export function registerUserTools(server: McpServer, client: JellyfinClient): vo
   );
 
   server.tool(
+    "jellyfin_get_user",
+    "Get one Jellyfin user's password status, login/activity timestamps, and selected policy fields. Unreported values are null.",
+    {
+      userId: z.string().refine((value) => value.trim().length > 0, "User ID must not be blank")
+        .describe("User ID from jellyfin_list_users"),
+    },
+    { ...READ_ONLY, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    toToolHandler(({ userId }) =>
+      toolResult(Effect.gen(function* () {
+        const user = yield* fromPromise(() => client.getUser(userId));
+        const policy = user.Policy;
+        return ok({
+          id: user.Id ?? null,
+          name: user.Name ?? null,
+          hasPassword: user.HasPassword ?? null,
+          lastLogin: user.LastLoginDate ?? null,
+          lastActivity: user.LastActivityDate ?? null,
+          policy: {
+            isAdministrator: policy?.IsAdministrator ?? null,
+            isDisabled: policy?.IsDisabled ?? null,
+            isHidden: policy?.IsHidden ?? null,
+            enableRemoteAccess: policy?.EnableRemoteAccess ?? null,
+            enableMediaPlayback: policy?.EnableMediaPlayback ?? null,
+            enableContentDeletion: policy?.EnableContentDeletion ?? null,
+            enableContentDownloading: policy?.EnableContentDownloading ?? null,
+            enableRemoteControlOfOtherUsers: policy?.EnableRemoteControlOfOtherUsers ?? null,
+            enablePublicSharing: policy?.EnablePublicSharing ?? null,
+            enableAllFolders: policy?.EnableAllFolders ?? null,
+            enabledFolders: policy?.EnabledFolders ?? null,
+            loginAttemptsBeforeLockout: policy?.LoginAttemptsBeforeLockout ?? null,
+            invalidLoginAttemptCount: policy?.InvalidLoginAttemptCount ?? null,
+            maxActiveSessions: policy?.MaxActiveSessions ?? null,
+            authenticationProviderId: policy?.AuthenticationProviderId ?? null,
+          },
+        });
+      })),
+    ),
+  );
+
+  server.tool(
     "jellyfin_create_user",
     "Create a new Jellyfin user. Returns the new user's ID. Pass a password separately via jellyfin_set_user_password.",
     {
