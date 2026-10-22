@@ -53,7 +53,7 @@ describe("jellyfin_get_activity_log", () => {
       severity: "Warning",
       type: "VideoPlayback",
       name: "Example episode",
-      sortBy: "Date",
+      sortBy: "DateCreated",
       sortOrder: "Descending",
     };
     await call(filters);

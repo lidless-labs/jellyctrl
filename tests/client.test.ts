@@ -691,7 +691,7 @@ describe("JellyfinClient", () => {
       ["severity", { severity: "Warning" }, "limit=20&severity=Warning"],
       ["type", { type: "Video Playback/Start" }, "limit=20&type=Video+Playback%2FStart"],
       ["name", { name: "Example + episode?" }, "limit=20&name=Example+%2B+episode%3F"],
-      ["sortBy", { sortBy: "Date,Name" }, "limit=20&sortBy=Date%2CName"],
+      ["sortBy", { sortBy: "DateCreated,Name" }, "limit=20&sortBy=DateCreated%2CName"],
       ["sortOrder", { sortOrder: "Descending" }, "limit=20&sortOrder=Descending"],
       ["combined filters", {
         startIndex: 0,
@@ -703,9 +703,9 @@ describe("JellyfinClient", () => {
         severity: "Error",
         type: "Video/Start",
         name: "Example + episode?",
-        sortBy: "Date,Name",
+        sortBy: "DateCreated,Name",
         sortOrder: "Ascending",
-      }, "limit=200&startIndex=0&minDate=2026-01-01T00%3A00%3A00Z&maxDate=2026-02-01T00%3A00%3A00Z&hasUserId=false&username=example+user%26admin&severity=Error&type=Video%2FStart&name=Example+%2B+episode%3F&sortBy=Date%2CName&sortOrder=Ascending"],
+      }, "limit=200&startIndex=0&minDate=2026-01-01T00%3A00%3A00Z&maxDate=2026-02-01T00%3A00%3A00Z&hasUserId=false&username=example+user%26admin&severity=Error&type=Video%2FStart&name=Example+%2B+episode%3F&sortBy=DateCreated%2CName&sortOrder=Ascending"],
     ])("serializes %s with the upstream query names", async (_name, options, query) => {
       fetchMock.mockResolvedValueOnce(
         new Response(JSON.stringify({ Items: [], TotalRecordCount: 0 }), { status: 200 }),

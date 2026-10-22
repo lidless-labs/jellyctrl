@@ -64,7 +64,7 @@ export function registerTaskTools(server: McpServer, client: JellyfinClient): vo
       severity: z.enum(["Trace", "Debug", "Information", "Warning", "Error", "Critical", "None"]).optional(),
       type: z.string().optional().describe("Filter by activity type."),
       name: z.string().optional().describe("Filter by activity name."),
-      sortBy: z.string().optional().describe("Jellyfin activity sort field, or comma-separated fields."),
+      sortBy: z.string().optional().describe("Jellyfin activity sort field, or comma-separated fields: Name, Overiew, ShortOverview, Type, DateCreated, Username, LogSeverity."),
       sortOrder: z.enum(["Ascending", "Descending"]).optional(),
     },
     { ...READ_ONLY, destructiveHint: false, idempotentHint: true, openWorldHint: true },
