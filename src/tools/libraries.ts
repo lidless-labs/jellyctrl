@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import type { JellyfinClient } from "../client.js";
 import { fromPromise, toolResult, toToolHandler } from "../effect/tool-adapter.js";
-import { ok, NON_DESTRUCTIVE, READ_ONLY } from "./_util.js";
+import { ok, refuseUnconfirmed, NON_DESTRUCTIVE, READ_ONLY } from "./_util.js";
 
 export function registerLibraryTools(server: McpServer, client: JellyfinClient): void {
   server.tool(
@@ -28,16 +28,18 @@ export function registerLibraryTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_scan_library",
-    "Trigger a library scan. Pass a specific library ID to scan just that one, or omit to scan all libraries. Returns immediately - the scan runs async in Jellyfin.",
+    "Trigger a library scan. Pass a specific library ID to scan just that one, or omit to scan all libraries. Returns immediately - the scan runs async in Jellyfin. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       libraryId: z
         .string()
         .optional()
         .describe("Library ID from jellyfin_list_libraries. Omit to scan all libraries."),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ libraryId }) =>
+    toToolHandler(({ confirm, libraryId }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("scan library");
         yield* fromPromise(() => client.scanLibraries(libraryId));
         return ok({
           result: libraryId

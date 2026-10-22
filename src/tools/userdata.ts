@@ -538,14 +538,16 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
 
   server.tool(
     "jellyfin_mark_played",
-    "Mark an item as watched/played for a user. Updates resume state and play count.",
+    "Mark an item as watched/played for a user. Updates resume state and play count. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       userId: z.string().describe("User ID from jellyfin_list_users"),
       itemId: z.string().describe("Item ID from a search or recent-items result"),
     },
-    NON_DESTRUCTIVE,
-    toToolHandler(({ userId, itemId }) =>
+    DESTRUCTIVE,
+    toToolHandler(({ confirm, userId, itemId }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("mark played");
         yield* fromPromise(() => client.markPlayed(userId, itemId));
         return ok({ result: `item ${itemId} marked played for user ${userId}` });
       })),
@@ -554,14 +556,16 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
 
   server.tool(
     "jellyfin_mark_unplayed",
-    "Mark an item as unwatched/unplayed for a user.",
+    "Mark an item as unwatched/unplayed for a user. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       userId: z.string().describe("User ID from jellyfin_list_users"),
       itemId: z.string().describe("Item ID from a search or recent-items result"),
     },
-    NON_DESTRUCTIVE,
-    toToolHandler(({ userId, itemId }) =>
+    DESTRUCTIVE,
+    toToolHandler(({ confirm, userId, itemId }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("mark unplayed");
         yield* fromPromise(() => client.markUnplayed(userId, itemId));
         return ok({ result: `item ${itemId} marked unplayed for user ${userId}` });
       })),
@@ -570,14 +574,16 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
 
   server.tool(
     "jellyfin_set_favorite",
-    "Add an item to a user's favorites.",
+    "Add an item to a user's favorites. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       userId: z.string().describe("User ID from jellyfin_list_users"),
       itemId: z.string().describe("Item ID from a search or recent-items result"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ userId, itemId }) =>
+    toToolHandler(({ confirm, userId, itemId }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("set favorite");
         yield* fromPromise(() => client.setFavorite(userId, itemId));
         return ok({ result: `item ${itemId} favorited for user ${userId}` });
       })),
@@ -586,14 +592,16 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
 
   server.tool(
     "jellyfin_unset_favorite",
-    "Remove an item from a user's favorites.",
+    "Remove an item from a user's favorites. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       userId: z.string().describe("User ID from jellyfin_list_users"),
       itemId: z.string().describe("Item ID from a search or recent-items result"),
     },
-    NON_DESTRUCTIVE,
-    toToolHandler(({ userId, itemId }) =>
+    DESTRUCTIVE,
+    toToolHandler(({ confirm, userId, itemId }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("unset favorite");
         yield* fromPromise(() => client.unsetFavorite(userId, itemId));
         return ok({ result: `item ${itemId} unfavorited for user ${userId}` });
       })),

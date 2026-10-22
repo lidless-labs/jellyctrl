@@ -21,6 +21,31 @@ describe("JellyfinClient", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([
+    { limit: undefined, startIndex: undefined, query: "Limit=100&StartIndex=0" },
+    { limit: 25, startIndex: 100, query: "Limit=25&StartIndex=100" },
+  ])("fetches one playlist page with $query", async ({ limit, startIndex, query }) => {
+    const payload = { TotalRecordCount: 350, StartIndex: startIndex ?? 0, Items: [] };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload)));
+
+    const result = limit === undefined
+      ? await client.getPlaylistItems("pl /1", "u /1")
+      : await client.getPlaylistItems("pl /1", "u /1", limit, startIndex);
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      `http://jellyfin.test/Playlists/pl%20%2F1/Items?UserId=u+%2F1&${query}`,
+      expect.any(Object),
+    );
+  });
+
+  it.each([
+    [0, 0], [101, 0], [1.5, 0], [100, -1], [100, 0.5],
+  ])("rejects invalid client playlist bounds %s/%s before fetching", async (limit, startIndex) => {
+    await expect(client.getPlaylistItems("pl1", "u1", limit, startIndex)).rejects.toThrow(RangeError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("sends the MediaBrowser Authorization token on requests", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ ServerName: "Test", Version: "12.0.0", Id: "abc" }), {
@@ -74,8 +99,9 @@ describe("JellyfinClient", () => {
   });
 
   it("redacts transport failures while reading a successful response body", async () => {
-    const response = new Response("", { status: 200 });
-    vi.spyOn(response, "text").mockRejectedValueOnce(new Error("PRIVATE_BODY_READ_MARKER"));
+    const response = new Response(new ReadableStream({
+      start(controller) { controller.error(new Error("PRIVATE_BODY_READ_MARKER")); },
+    }));
     fetchMock.mockResolvedValueOnce(response);
 
     await expect(client.getSystemInfo()).rejects.toThrow("Unable to connect to Jellyfin");
@@ -116,24 +142,28 @@ describe("JellyfinClient", () => {
     }
   });
 
-  it("does not leak the raw downstream body into the thrown error", async () => {
-    const internal =
-      "System.Exception: secret stack trace at /opt/jellyfin/internal/path.cs:42";
+  it.each([401, 403, 404, 500, 502])("keeps HTTP %s errors and stderr free of response bodies and query values", async (status) => {
     const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
-    fetchMock.mockResolvedValueOnce(new Response(internal, { status: 500 }));
-
-    await expect(client.getSystemInfo()).rejects.toThrow(
-      "Jellyfin server error (HTTP 500)",
-    );
-    // Client-facing message must not carry the internal body...
-    await expect(client.getSystemInfo().catch((e) => e.message)).resolves.not.toContain(
-      "secret stack trace",
-    );
-    // ...but operators still get the full body on stderr.
-    expect(stderr).toHaveBeenCalledWith(
-      expect.stringContaining("secret stack trace"),
-    );
-    stderr.mockRestore();
+    const cancel = vi.fn();
+    let chunk = 0;
+    const response = new Response(new ReadableStream({
+      pull(controller) {
+        if (chunk++ === 0) controller.enqueue(new TextEncoder().encode("example-response-marker"));
+        else controller.close();
+      },
+      cancel,
+    }, { highWaterMark: 0 }), { status });
+    fetchMock.mockResolvedValueOnce(response);
+    try {
+      const error = await client.authorizeQuickConnect("example-query-marker", "user-example").catch((error: Error) => error);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(`HTTP ${status}`);
+      expect(String(error)).not.toContain("?");
+      expect(String(error)).not.toContain("example-");
+      expect(stderr).toHaveBeenCalledExactlyOnceWith(`jellyfin-mcp: upstream request failed (HTTP ${status})`);
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally { stderr.mockRestore(); }
   });
 
   it("scopes TLS-skip to the Jellyfin connection via a per-request dispatcher", async () => {
@@ -673,5 +703,111 @@ describe("JellyfinClient", () => {
     const parsed = new URL(url as string);
     expect(parsed.searchParams.get("code")).toBe("A B&C=D");
     expect(parsed.searchParams.get("userId")).toBe("user/42?x");
+  });
+});
+
+describe("bounded upstream response reads", () => {
+  const cap = 2 * 1024 * 1024;
+  const config = { url: "http://jellyfin.example", apiKey: "example-key", verifySsl: true, timeout: 5000 };
+
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+  it("rejects oversized content-length before reading and cancels the body", async () => {
+    const cancel = vi.fn();
+    let chunk = 0;
+    const response = new Response(new ReadableStream({
+      pull(controller) {
+        if (chunk++ === 0) controller.enqueue(new TextEncoder().encode("true"));
+        else controller.close();
+      },
+      cancel,
+    }, { highWaterMark: 0 }), { headers: { "content-length": String(cap + 1) } });
+    const getReader = vi.spyOn(response.body!, "getReader");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    await expect(new JellyfinClient(config).getQuickConnectEnabled()).rejects.toThrow("Jellyfin response exceeds the 2097152-byte limit");
+    expect(getReader).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(response.body!.locked).toBe(false);
+  });
+
+  it.each([undefined, "1"])("counts streamed UTF-8 bytes despite content-length %s and cancels on overflow", async (length) => {
+    const cancel = vi.fn();
+    const bytes = new TextEncoder().encode(JSON.stringify("é".repeat(cap / 2)));
+    let chunk = 0;
+    const response = new Response(new ReadableStream({
+      pull(controller) {
+        if (chunk === 0) controller.enqueue(bytes.subarray(0, cap));
+        else if (chunk === 1) controller.enqueue(bytes.subarray(cap));
+        else controller.close();
+        chunk++;
+      },
+      cancel,
+    }, { highWaterMark: 0 }), { headers: length ? { "content-length": length } : {} });
+    let signal: AbortSignal | null | undefined;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url, init: RequestInit) => { signal = init.signal; return Promise.resolve(response); }));
+    const result = new JellyfinClient(config).getSystemInfo().catch((error: Error) => error);
+    const error = await result;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("Jellyfin response exceeds the 2097152-byte limit");
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("accepts JSON at the exact byte limit across UTF-8 chunk boundaries", async () => {
+    const value = "é".repeat((cap - 2) / 2);
+    const bytes = new TextEncoder().encode(JSON.stringify(value));
+    const response = new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(bytes.subarray(0, 2));
+      controller.enqueue(bytes.subarray(2, 13));
+      controller.enqueue(bytes.subarray(13));
+      controller.close();
+    } }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    await expect(new JellyfinClient(config).getSystemInfo()).resolves.toBe(value);
+  });
+
+  it("cancels unused successful write response bodies without reading", async () => {
+    const cancel = vi.fn();
+    const response = new Response(new ReadableStream({ cancel }));
+    const getReader = vi.spyOn(response.body!, "getReader");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    await expect(new JellyfinClient(config).pauseSession("session-example")).resolves.toBeUndefined();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(getReader).not.toHaveBeenCalled();
+  });
+
+  it("cancels a pending successful body read even when the stream ignores AbortSignal", async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    const pull = vi.fn(() => new Promise<void>(() => {}));
+    const response = new Response(new ReadableStream({ pull, cancel }, { highWaterMark: 0 }));
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+    const result = new JellyfinClient(config)
+      .getPlaylistItems("playlist-example", "example-query-marker")
+      .catch((error: Error) => error);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pull).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(await result).toMatchObject({ message: "Request to /Playlists/playlist-example/Items timed out after 5000ms" });
+    expect(response.body!.locked).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps the whole-body deadline active without query secrets", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((_url, init: RequestInit) => Promise.resolve(new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(" "));
+        init.signal!.addEventListener("abort", () => controller.error(new DOMException("example-abort", "AbortError")));
+      },
+    })))));
+    const result = new JellyfinClient(config).authorizeQuickConnect("example-query-marker", "user-example").catch((error: Error) => error);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await result).toMatchObject({ message: "Request to /QuickConnect/Authorize timed out after 5000ms" });
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

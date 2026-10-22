@@ -30,7 +30,7 @@
 
 jellyctrl is an operator control CLI for [Jellyfin](https://jellyfin.org), the free self-hosted media server. It gives shells, cron, CI, and agents a typed command surface for inspecting and operating a Jellyfin server without clicking through the dashboard. The same npm package is still published as `jellyfin-mcp` for compatibility, and the MCP adapter remains available through both `jellyctrl mcp` and the legacy `jellyfin-mcp` bin.
 
-You want it because asking "what's playing in the living room?" or running `jellyctrl sessions --active-only` is faster than dashboard hopping, and because an agent can chain those steps when launched through MCP. Compared with a generic HTTP tool or hand-written script, the MCP adapter exposes 57 schema-validated tools with `confirm: true` gates on every destructive operation and annotations that let clients route those calls to human approval.
+You want it because asking "what's playing in the living room?" or running `jellyctrl sessions --active-only` is faster than dashboard hopping, and because an agent can chain those steps when launched through MCP. Compared with a generic HTTP tool or hand-written script, the MCP adapter exposes 57 schema-validated tools with `confirm: true` gates on every mutating operation and annotations that let clients route those calls to human approval.
 
 > **Status: WIP.** Used daily against a real Jellyfin server, but the tool surface is still settling and breaking changes can land between minor versions. Pin a released version if you need stability.
 
@@ -40,7 +40,7 @@ Companion to [arr-cli](https://github.com/lidless-labs/arr-cli) (the *arr stack 
 
 Jellyfin is a free, self-hosted media server: your movies, shows, music, and photos on hardware you control. jellyctrl puts that media server's management surface in front of operators first: list sessions, inspect libraries, query users, search items, review activity, and script routine checks from the command line.
 
-For MCP-compatible clients, `jellyctrl mcp` exposes the same project as a stdio MCP server with 57 typed tools so an agent can list who is watching what, pause or cast a session, scan a library, manage users, prune Continue Watching, run a scheduled task, or message a client, all as structured tool calls instead of raw REST. The MCP surface is read-and-write: discovery and reporting tools are read-only, while every destructive or privileged operation is gated behind an explicit `confirm: true` flag and a `destructiveHint` annotation. The `jellyfin-mcp` command remains supported as a compatibility bin.
+For MCP-compatible clients, `jellyctrl mcp` exposes the same project as a stdio MCP server with 57 typed tools so an agent can list who is watching what, pause or cast a session, scan a library, manage users, prune Continue Watching, run a scheduled task, or message a client, all as structured tool calls instead of raw REST. The MCP surface is read-and-write: discovery and reporting tools are read-only, while every mutating operation requires an explicit `confirm: true` flag. Annotations identify reads, destructive effects, retry safety, and interaction with the Jellyfin server. The `jellyfin-mcp` command remains supported as a compatibility bin.
 
 ## Install
 
@@ -125,6 +125,8 @@ Do not expose this listener directly or change it to a non-loopback bind. For re
 
 ## Tools
 
+Every tool that changes Jellyfin state requires `confirm: true`, including playback commands, messages, account creation, library scans, user-data changes, and playlist or collection updates. Read-only tools do not require confirmation.
+
 ### System
 - `jellyfin_get_status` - server name, version, OS, pending restart, update availability
 - `jellyfin_restart_server` - restart the Jellyfin process *(requires `confirm: true`)*
@@ -172,9 +174,14 @@ Do not expose this listener directly or change it to a non-loopback bind. For re
 ### Playlists
 - `jellyfin_list_playlists`
 - `jellyfin_create_playlist`
-- `jellyfin_get_playlist_items` - returns `playlistEntryId` (use this for removal, not the raw item ID)
+- `jellyfin_get_playlist_items` - one page of items with `startIndex`, `totalCount`, and `playlistEntryId` (use the entry ID for removal)
 - `jellyfin_add_to_playlist`
 - `jellyfin_remove_from_playlist` *(requires `confirm: true`)*
+
+Playlist item reads accept optional `limit` (default 100, range 1-100) and
+`startIndex` (default 0, zero-based). Each call fetches one page in playback
+order and retains separate entry IDs when the same item appears more than once.
+Use the returned `totalCount` to decide whether to request another page.
 
 ### Collections
 - `jellyfin_create_collection`
@@ -223,7 +230,8 @@ jellyctrl user-data --user 3f1c... --item 6e0b...
 jellyctrl activity --limit 50
 jellyctrl tasks
 jellyctrl playlists --user 3f1c...
-jellyctrl playlist 4c7e... --user 3f1c...
+jellyctrl playlist 4c7e... --user 3f1c...          # first 100 entries
+jellyctrl playlist 4c7e... --user 3f1c... --limit 100 --start-index 100
 jellyctrl status --json                           # raw JSON for piping
 ```
 
@@ -405,8 +413,9 @@ Then point `JELLYFIN_URL` at `http://localhost:8096`. The MCP itself has no SSH 
 - Library scan triggering (per-library or all)
 - User admin: list, create, delete, enable/disable, reset password
 - Activity log queries for recent events
-- Destructive / privileged ops (`restart`, `shutdown`, `delete_user`, `set_user_password`, `quick_connect_authorize`, `jellyfin_run_scheduled_task`, `jellyfin_clear_continue_watching`, bulk session controls, resume-position writes) require explicit `confirm: true`
-- Upstream Jellyfin error responses are summarized (status only) before being returned to the client; the full response body is logged to stderr for operators, so internal server detail is not surfaced to the model
+- All mutating MCP tools require explicit `confirm: true`, including routine playback commands, messages, creation, and additive updates
+- Upstream HTTP errors use status-based summaries. Errors and stderr omit downstream response bodies and request query values
+- Upstream JSON response reads and serialized MCP success and error text each have a 2 MiB (2,097,152-byte) limit. Oversized responses are cancelled before parsing, and oversized tool output returns a JSON error with `isError: true`. Use smaller pages or filters to reduce results
 - Works from a shell, cron, CI, Claude Desktop, Claude Code, OpenClaw, Hermes Agent, Codex CLI, and any MCP-compatible client
 
 ## Example Prompts
@@ -417,15 +426,15 @@ Calls `jellyfin_list_sessions` with `activeOnly=true`.
 
 > Pause whatever's playing in the living room
 
-Calls `jellyfin_list_sessions`, finds the session by device name, then `jellyfin_pause_session`.
+Calls `jellyfin_list_sessions`, finds the session by device name, then `jellyfin_pause_session` with `confirm: true`.
 
 > Scan the Movies library
 
-Calls `jellyfin_list_libraries` to find the ID, then `jellyfin_scan_library`.
+Calls `jellyfin_list_libraries` to find the ID, then `jellyfin_scan_library` with `confirm: true`.
 
 > Send a message to my partner's Jellyfin that dinner is ready
 
-`jellyfin_list_sessions` -> pick by username -> `jellyfin_send_message_to_session`.
+`jellyfin_list_sessions` -> pick by username -> `jellyfin_send_message_to_session` with `confirm: true`.
 
 > What scheduled tasks have failed recently?
 
@@ -480,7 +489,10 @@ npm run dev       # watch mode with tsx
 npm run typecheck # tsc --noEmit
 npm run build     # tsup bundle
 npm test          # vitest
+npm run audit:prod # production dependency audit
 ```
+
+The production dependency audit blocks high and critical advisories in direct and transitive runtime dependencies. Low and moderate advisories do not block by default. Set `AUDIT_LEVEL=moderate` to include moderate advisories in the gate.
 
 ## Contributing
 

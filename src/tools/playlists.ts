@@ -29,8 +29,9 @@ export function registerPlaylistTools(server: McpServer, client: JellyfinClient)
 
   server.tool(
     "jellyfin_create_playlist",
-    "Create a new playlist owned by a user, optionally pre-populated with items.",
+    "Create a new playlist owned by a user, optionally pre-populated with items. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       name: z.string().min(1).describe("Playlist name"),
       userId: z.string().describe("Owner user ID"),
       itemIds: z
@@ -44,8 +45,9 @@ export function registerPlaylistTools(server: McpServer, client: JellyfinClient)
         .describe("Media type - required by Jellyfin if itemIds is empty"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ name, userId, itemIds, mediaType }) =>
+    toToolHandler(({ confirm, name, userId, itemIds, mediaType }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("create playlist");
         const created = yield* fromPromise(() =>
           client.createPlaylist(name, userId, itemIds, mediaType),
         );
@@ -56,16 +58,19 @@ export function registerPlaylistTools(server: McpServer, client: JellyfinClient)
 
   server.tool(
     "jellyfin_get_playlist_items",
-    "List the items in a playlist, in playback order. Returns each item's playlistEntryId (use that for removal, NOT the underlying item ID).",
+    "List one page of playlist items in playback order. Use startIndex and limit for later pages. Returns each item's playlistEntryId (use that for removal, NOT the underlying item ID).",
     {
       playlistId: z.string().describe("Playlist ID"),
       userId: z.string().describe("User ID - playlists return user-scoped views"),
+      limit: z.number().int().min(1).max(100).optional().default(100).describe("Page size, at most 100 items."),
+      startIndex: z.number().int().nonnegative().optional().default(0).describe("Zero-based page offset."),
     },
     READ_ONLY,
-    toToolHandler(({ playlistId, userId }) =>
+    toToolHandler(({ playlistId, userId, limit, startIndex }) =>
       toolResult(Effect.gen(function* () {
-        const payload = yield* fromPromise(() => client.getPlaylistItems(playlistId, userId));
+        const payload = yield* fromPromise(() => client.getPlaylistItems(playlistId, userId, limit, startIndex));
         return ok({
+          startIndex: payload.StartIndex ?? startIndex,
           totalCount: payload.TotalRecordCount,
           items: payload.Items.map((i) => ({
             playlistEntryId: (i as { PlaylistItemId?: string }).PlaylistItemId ?? null,
@@ -81,15 +86,17 @@ export function registerPlaylistTools(server: McpServer, client: JellyfinClient)
 
   server.tool(
     "jellyfin_add_to_playlist",
-    "Append items to an existing playlist.",
+    "Append items to an existing playlist. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       playlistId: z.string().describe("Playlist ID"),
       itemIds: z.array(z.string().min(1)).min(1).describe("Item IDs to append"),
       userId: z.string().describe("User ID performing the add"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ playlistId, itemIds, userId }) =>
+    toToolHandler(({ confirm, playlistId, itemIds, userId }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("add to playlist");
         yield* fromPromise(() => client.addToPlaylist(playlistId, itemIds, userId));
         return ok({ result: `added ${itemIds.length} item(s) to playlist ${playlistId}` });
       })),

@@ -18,7 +18,6 @@ export class InvalidTimeoutError extends Data.TaggedError("InvalidTimeoutError")
 export class JellyfinHttpError extends Data.TaggedError("JellyfinHttpError")<{
   readonly path: string;
   readonly status: number;
-  readonly body: string;
   readonly summary: string;
 }> {}
 
@@ -37,10 +36,15 @@ export class JellyfinParseError extends Data.TaggedError("JellyfinParseError")<{
   readonly cause: unknown;
 }> {}
 
+export class JellyfinResponseSizeError extends Data.TaggedError("JellyfinResponseSizeError")<{
+  readonly limit: number;
+}> {}
+
 export type ConfigEffectError = MissingConfigError | InvalidTimeoutError;
 
 export type JellyfinRequestError =
   | JellyfinHttpError
   | JellyfinTimeoutError
   | JellyfinTransportError
-  | JellyfinParseError;
+  | JellyfinParseError
+  | JellyfinResponseSizeError;
