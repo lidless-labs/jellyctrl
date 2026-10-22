@@ -40,7 +40,7 @@ Companion to [arr-cli](https://github.com/lidless-labs/arr-cli) (the *arr stack 
 
 Jellyfin is a free, self-hosted media server: your movies, shows, music, and photos on hardware you control. jellyctrl puts that media server's management surface in front of operators first: list sessions, inspect libraries, query users, search items, review activity, and script routine checks from the command line.
 
-For MCP-compatible clients, `jellyctrl mcp` exposes the same project as a stdio MCP server with 61 typed tools so an agent can list who is watching what, pause or cast a session, scan a library, manage users, prune Continue Watching, run a scheduled task, or message a client, all as structured tool calls instead of raw REST. The MCP surface is read-and-write: discovery and reporting tools are read-only, while every destructive or privileged operation is gated behind an explicit `confirm: true` flag and a `destructiveHint` annotation. The `jellyfin-mcp` command remains supported as a compatibility bin.
+For MCP-compatible clients, `jellyctrl mcp` exposes the same project as a stdio MCP server with 61 typed tools so an agent can list who is watching what, pause or cast a session, trigger a library scan, manage users, prune Continue Watching, run a scheduled task, or message a client, all as structured tool calls instead of raw REST. The MCP surface is read-and-write: discovery and reporting tools are read-only, while tools that change playback or records require `confirm: true`. The `jellyfin-mcp` command remains supported as a compatibility bin.
 
 ## Install
 
@@ -125,6 +125,8 @@ Do not expose this listener directly or change it to a non-loopback bind. For re
 
 ## Tools
 
+Playback controls, messages, account creation, user-data changes, and playlist or collection updates require `confirm: true`.
+
 ### System
 - `jellyfin_get_status` - server name, version, OS, pending restart, update availability
 - `jellyfin_list_plugins` - installed plugin counts by status and summaries for non-Active plugins. Set `includeDetails: true` for all plugins with versions, descriptions, and uninstallability.
@@ -144,7 +146,7 @@ for absent optional metadata. The device total reflects all matching devices. Ea
 
 ### Libraries
 - `jellyfin_list_libraries` - all virtual folders with IDs, collection types, paths
-- `jellyfin_scan_library` - trigger scan for one library or all
+- `jellyfin_scan_library` - trigger a Jellyfin library scan
 
 ### Users
 - `jellyfin_list_users` - with admin / disabled flags and last login timestamps
@@ -194,9 +196,14 @@ for absent optional metadata. The device total reflects all matching devices. Ea
 ### Playlists
 - `jellyfin_list_playlists`
 - `jellyfin_create_playlist`
-- `jellyfin_get_playlist_items` - returns `playlistEntryId` (use this for removal, not the raw item ID)
+- `jellyfin_get_playlist_items` - one page of items with `startIndex`, `totalCount`, and `playlistEntryId` (use the entry ID for removal)
 - `jellyfin_add_to_playlist`
 - `jellyfin_remove_from_playlist` *(requires `confirm: true`)*
+
+Playlist item reads accept optional `limit` (default 100, range 1-100) and
+`startIndex` (default 0, zero-based). Each call fetches one page in playback
+order and retains separate entry IDs when the same item appears more than once.
+Use the returned `totalCount` to decide whether to request another page.
 
 ### Collections
 - `jellyfin_create_collection`
@@ -246,7 +253,8 @@ jellyctrl activity --limit 50
 jellyctrl activity --include-details
 jellyctrl tasks
 jellyctrl playlists --user 3f1c...
-jellyctrl playlist 4c7e... --user 3f1c...
+jellyctrl playlist 4c7e... --user 3f1c...          # first 100 entries
+jellyctrl playlist 4c7e... --user 3f1c... --limit 100 --start-index 100
 jellyctrl status --json                           # raw JSON for piping
 ```
 
@@ -426,11 +434,11 @@ Then point `JELLYFIN_URL` at `http://localhost:8096`. The MCP itself has no SSH 
 - Collections: create, add, remove
 - Discovery: resume queue, next-up episodes, similar items
 - Quick Connect: check status, authorize a pending code for a user
-- Library scan triggering (per-library or all)
+- Library scan triggering
 - User admin: list, inspect password status and selected policy fields, create, delete, enable/disable, reset password
 - Activity log queries for recent events
-- Destructive / privileged ops (`restart`, `shutdown`, `delete_user`, `set_user_password`, `quick_connect_authorize`, `jellyfin_run_scheduled_task`, `jellyfin_clear_continue_watching`, bulk session controls, resume-position writes) require explicit `confirm: true`
-- Upstream Jellyfin error responses are summarized (status only) before being returned to the client; the full response body is logged to stderr for operators, so internal server detail is not surfaced to the model
+- Upstream HTTP errors use status-based summaries. Errors and stderr omit downstream response bodies and request query values
+- Upstream Jellyfin JSON reads are limited to 2 MiB. The MCP adapter caps success and error results at 90,000 UTF-8 bytes.
 - Works from a shell, cron, CI, Claude Desktop, Claude Code, OpenClaw, Hermes Agent, Codex CLI, and any MCP-compatible client
 
 ## Example Prompts
@@ -441,15 +449,15 @@ Calls `jellyfin_list_sessions` with `activeOnly=true`.
 
 > Pause whatever's playing in the living room
 
-Calls `jellyfin_list_sessions`, finds the session by device name, then `jellyfin_pause_session`.
+Calls `jellyfin_list_sessions`, finds the session by device name, then `jellyfin_pause_session` with `confirm: true`.
 
-> Scan the Movies library
+> Scan the Jellyfin libraries
 
-Calls `jellyfin_list_libraries` to find the ID, then `jellyfin_scan_library`.
+Calls `jellyfin_scan_library`.
 
 > Send a message to my partner's Jellyfin that dinner is ready
 
-`jellyfin_list_sessions` -> pick by username -> `jellyfin_send_message_to_session`.
+`jellyfin_list_sessions` -> pick by username -> `jellyfin_send_message_to_session` with `confirm: true`.
 
 > What scheduled tasks have failed recently?
 
@@ -504,7 +512,10 @@ npm run dev       # watch mode with tsx
 npm run typecheck # tsc --noEmit
 npm run build     # tsup bundle
 npm test          # vitest
+npm run audit:prod # production dependency audit
 ```
+
+The production dependency audit blocks high and critical advisories in direct and transitive runtime dependencies. Low and moderate advisories do not block by default. Set `AUDIT_LEVEL=moderate` to include moderate advisories in the gate.
 
 ## Contributing
 

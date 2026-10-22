@@ -8,8 +8,9 @@ import { ok, refuseUnconfirmed, DESTRUCTIVE, NON_DESTRUCTIVE } from "./_util.js"
 export function registerCollectionTools(server: McpServer, client: JellyfinClient): void {
   server.tool(
     "jellyfin_create_collection",
-    "Create a new collection (BoxSet), optionally pre-populated with items. Collections are server-wide, not per-user.",
+    "Create a new collection (BoxSet), optionally pre-populated with items. Collections are server-wide, not per-user. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       name: z.string().min(1).describe("Collection name"),
       itemIds: z
         .array(z.string().min(1))
@@ -18,8 +19,9 @@ export function registerCollectionTools(server: McpServer, client: JellyfinClien
         .describe("Optional initial item IDs"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ name, itemIds }) =>
+    toToolHandler(({ confirm, name, itemIds }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("create collection");
         const collection = yield* fromPromise(() => client.createCollection(name, itemIds));
         return ok({ id: collection.Id, name });
       })),
@@ -28,14 +30,16 @@ export function registerCollectionTools(server: McpServer, client: JellyfinClien
 
   server.tool(
     "jellyfin_add_to_collection",
-    "Add items to an existing collection.",
+    "Add items to an existing collection. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       collectionId: z.string().describe("Collection ID"),
       itemIds: z.array(z.string().min(1)).min(1).describe("Item IDs to add"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ collectionId, itemIds }) =>
+    toToolHandler(({ confirm, collectionId, itemIds }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("add to collection");
         yield* fromPromise(() => client.addToCollection(collectionId, itemIds));
         return ok({ result: `added ${itemIds.length} item(s) to collection ${collectionId}` });
       })),

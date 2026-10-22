@@ -132,8 +132,9 @@ describe("playlist tools", () => {
 
       const result = await call("jellyfin_get_playlist_items", { playlistId: "pl-1", userId: "u-1" });
 
-      expect(getPlaylistItems).toHaveBeenCalledExactlyOnceWith("pl-1", "u-1");
+      expect(getPlaylistItems).toHaveBeenCalledExactlyOnceWith("pl-1", "u-1", 100, 0);
       expect(parseResult(result)).toEqual({
+        startIndex: 0,
         totalCount: 2,
         items: [
           { playlistEntryId: "entry-A", itemId: "item-1", name: "Track One", type: "Audio", seriesName: null },
@@ -149,7 +150,7 @@ describe("playlist tools", () => {
 
       expect(
         parseResult(await call("jellyfin_get_playlist_items", { playlistId: "pl-1", userId: "u-1" })),
-      ).toEqual({ totalCount: 0, items: [] });
+      ).toEqual({ startIndex: 0, totalCount: 0, items: [] });
     });
   });
 
