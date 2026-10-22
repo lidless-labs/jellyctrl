@@ -21,7 +21,8 @@ jellyfin-mcp is a Model Context Protocol server that exposes a [Jellyfin](https:
 - Personal details, hostnames, real private IPs, account IDs, or live API keys in code, tests, or docs. Use `192.0.2.x` (RFC 5737) for example IPs and placeholders like `your-api-key-here`. The `content-guard` check will flag leaks.
 - Tools that return raw upstream Jellyfin error bodies or secrets to the model. Summarize status and log detail to stderr instead.
 - A destructive or privileged tool without a `confirm: true` gate.
-- AI co-authorship trailers on commits (`Co-Authored-By: <model>`). Conventional commits only.
+- Commits that are not conventional commits, or that do not end with the trailer line `Co-Authored-By: Claude Duet <noreply@anthropic.com>`.
+- PRs whose body does not state what changed, why, and the exact tests run.
 
 ## Local dev
 
