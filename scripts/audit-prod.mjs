@@ -86,10 +86,12 @@ function main() {
     console.log(`Transitive ${level}+ advisories (not gated, see #12):`);
     for (const f of warnings) console.log(formatFinding(f));
   }
+  // Everything goes to stdout so CI logs keep the two lists in order.
   if (blocking.length > 0) {
-    console.error(`Direct runtime dependencies with ${level}+ advisories:`);
-    for (const f of blocking) console.error(formatFinding(f));
-    process.exit(1);
+    console.log(`Direct runtime dependencies with ${level}+ advisories:`);
+    for (const f of blocking) console.log(formatFinding(f));
+    process.exitCode = 1;
+    return;
   }
   console.log(`No ${level}+ advisories on direct runtime dependencies.`);
 }
