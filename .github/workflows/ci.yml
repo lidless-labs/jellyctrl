@@ -34,8 +34,21 @@ jobs:
       - run: npm run build
       - run: npm test
 
+  audit:
+    # Production dependency audit gate (#12). Fails only on high or critical
+    # advisories filed against a direct runtime dependency.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run audit:prod
+
   publish:
-    needs: test
+    needs: [test, audit]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

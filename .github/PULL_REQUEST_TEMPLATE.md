@@ -9,6 +9,10 @@ See CONTRIBUTING.md for what lands easily and what needs an issue first.
 
 Closes #
 
+## Tests run
+
+<!-- The exact commands you ran and their results, e.g. `./scripts/verify`: 208 tests passed. -->
+
 ## Type of change
 
 - [ ] Bug fix in an existing tool
@@ -25,4 +29,4 @@ Closes #
 - [ ] Updated the `Tools` list and tool count in `README.md` if tools changed
 - [ ] Added an `## [Unreleased]` entry to `CHANGELOG.md` for any user-visible effect
 - [ ] No personal details, real hostnames, real IPs (use `192.0.2.x`), account names, API keys, or unredacted absolute paths in code, tests, docs, or this PR (the content-guard check will fail otherwise)
-- [ ] Conventional commit messages, no AI co-authorship trailers
+- [ ] Conventional commit messages, each ending with `Co-Authored-By: Claude Duet <noreply@anthropic.com>`

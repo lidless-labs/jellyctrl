@@ -29,8 +29,8 @@ For large scoping work, invoke `ultra-work-scout` first. It is installed with th
 
 ## Git
 
-- Do not add `Co-Authored-By` or AI-attribution trailers to commits, PR bodies, or public docs.
-- Use conventional commits.
+- Use conventional commits, and end every commit message with the trailer line `Co-Authored-By: Claude Duet <noreply@anthropic.com>`.
+- Every PR body states what changed, why, and the exact tests run with their results.
 - Never bypass pre-push hooks (`--no-verify`) unless the user has explicitly accepted the risk.
 - Never push to `main` directly on shared repos. Feature branch + PR.
 
