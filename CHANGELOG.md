@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped `@lidless-labs/effect-operator-kit` to
+  `1505318b2625fc273c51018389e2c61677e073d7`. Tool results, including error
+  results, are now capped at 90,000 UTF-8 bytes. An oversize result is cut with
+  a `[truncated: output was N bytes, limit is M bytes ...]` marker and carries
+  `structuredContent: { truncated: true, ... }`. Results under the cap are
+  unchanged.
+- The three annotation tiers (`READ_ONLY`, `NON_DESTRUCTIVE`, `DESTRUCTIVE`) are
+  now built with the kit helper. Their meaning is unchanged; every tool now also
+  carries explicit `idempotentHint` and `openWorldHint: false`, and reads carry
+  `destructiveHint: false`.
+
 ### Fixed
 
 - Continue Watching clears run at most four operations concurrently, preserve
