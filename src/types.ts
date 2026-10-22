@@ -14,6 +14,15 @@ export interface SystemInfo {
   [key: string]: unknown;
 }
 
+export interface PluginInfo {
+  Id: string;
+  Name: string;
+  Version: string;
+  Description: string;
+  Status: string;
+  CanUninstall: boolean;
+}
+
 export interface Library {
   Name: string;
   Locations: string[];

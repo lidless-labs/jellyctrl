@@ -23,6 +23,8 @@ const env = {
   JELLYFIN_MCP_HTTP_TOKEN: "independent-http-token-".repeat(2),
 };
 
+const realFetch = globalThis.fetch;
+
 class FakeResponse extends EventEmitter {
   status = 0;
   headersSent = false;
@@ -126,7 +128,7 @@ describe("HTTP transport configuration", () => {
 describe("HTTP remote tool policy", () => {
   it("classifies every registered tool exactly once", () => {
     const registered = captureRegisteredToolNames();
-    expect(registered).toHaveLength(58);
+    expect(registered).toHaveLength(59);
     expect(Object.keys(TOOL_REMOTE_POLICIES).sort()).toEqual([...registered].sort());
   });
 
@@ -156,6 +158,7 @@ describe("HTTP transport", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -197,6 +200,34 @@ describe("HTTP transport", () => {
       await client.connect(transport);
       expect((await client.listTools()).tools.some((tool) => tool.name === "jellyfin_get_status")).toBe(true);
       expect(transport.sessionId).toBeUndefined();
+    } finally {
+      await client.close();
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("allows plugin inventory through observe mode and makes one upstream GET", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify([
+      { Id: "plugin-1", Name: "Demo", Version: "1.0", Description: "Example", Status: "Disabled", CanUninstall: false },
+    ]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const server = createServer(createHttpListener(createHttpRequestHandler({ ...getHttpConfig(), remoteMode: "observe" })));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const client = new Client({ name: "http-plugin-test", version: "1" });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("No HTTP port");
+      const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`), {
+        requestInit: { headers: { authorization: `Bearer ${env.JELLYFIN_MCP_HTTP_TOKEN}` } },
+        fetch: realFetch,
+      });
+      await client.connect(transport);
+      const result = await client.callTool({ name: "jellyfin_list_plugins", arguments: {} });
+      expect(result.isError).not.toBe(true);
+      expect(JSON.stringify(result)).toContain("Demo");
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0][0]).toBe(`${env.JELLYFIN_URL}/Plugins`);
     } finally {
       await client.close();
       server.closeAllConnections();
