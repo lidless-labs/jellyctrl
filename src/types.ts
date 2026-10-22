@@ -114,15 +114,15 @@ export interface ActivityLogResponse {
 }
 
 export interface ApiKeyInfo {
-  Id: number;
+  Id?: number;
   AppName?: string | null;
   AppVersion?: string | null;
   DeviceName?: string | null;
   UserName?: string | null;
-  IsActive: boolean;
-  DateCreated: string;
+  IsActive?: boolean;
+  DateCreated?: string;
   DateRevoked?: string | null;
-  DateLastActivity: string;
+  DateLastActivity?: string;
 }
 
 export interface ApiKeysResponse {
