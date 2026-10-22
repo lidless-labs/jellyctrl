@@ -17,15 +17,15 @@ export function registerAccessTools(server: McpServer, client: JellyfinClient): 
         return ok({
           totalCount: result.TotalRecordCount,
           apiKeys: result.Items.map((key) => ({
-            id: key.Id,
+            id: key.Id ?? null,
             appName: key.AppName ?? null,
             appVersion: key.AppVersion ?? null,
             deviceName: key.DeviceName ?? null,
             userName: key.UserName ?? null,
-            isActive: key.IsActive,
-            dateCreated: key.DateCreated,
+            isActive: key.IsActive ?? null,
+            dateCreated: key.DateCreated ?? null,
             dateRevoked: key.DateRevoked ?? null,
-            dateLastActivity: key.DateLastActivity,
+            dateLastActivity: key.DateLastActivity ?? null,
           })),
         });
       })),

@@ -132,6 +132,28 @@ describe("access inventory tools", () => {
     expect(JSON.parse(result.content[0].text)).toEqual({ totalCount: 0, [entry.list]: [] });
   });
 
+  it("keeps all API-key fields when optional metadata is absent and preserves zero and false", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      Items: [{}, { Id: 0, IsActive: false, DateCreated: "", DateLastActivity: "" }],
+      TotalRecordCount: 2,
+    })));
+    const tool = tools.get("jellyfin_list_api_keys")!;
+    const result = await tool.handler(z.object(tool.schema).parse({}));
+    expect(result.isError).not.toBe(true);
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      totalCount: 2,
+      apiKeys: [{
+        id: null, appName: null, appVersion: null, deviceName: null,
+        userName: null, isActive: null, dateCreated: null,
+        dateRevoked: null, dateLastActivity: null,
+      }, {
+        id: 0, appName: null, appVersion: null, deviceName: null,
+        userName: null, isActive: false, dateCreated: "",
+        dateRevoked: null, dateLastActivity: "",
+      }],
+    });
+  });
+
   it.each(cases)("$tool reports client rejection as an MCP error", async (entry) => {
     fetchMock.mockRejectedValueOnce(new TypeError("example upstream failure"));
     const tool = tools.get(entry.tool);
