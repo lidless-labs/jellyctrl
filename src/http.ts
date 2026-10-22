@@ -23,6 +23,7 @@ export const TOOL_REMOTE_POLICIES: Record<string, ToolPolicy> = {
   jellyfin_list_libraries: "read",
   jellyfin_scan_library: "routine",
   jellyfin_list_users: "read",
+  jellyfin_get_user: "read",
   jellyfin_create_user: "high-impact",
   jellyfin_delete_user: "high-impact",
   jellyfin_set_user_disabled: "high-impact",

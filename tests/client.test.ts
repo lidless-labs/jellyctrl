@@ -21,6 +21,18 @@ describe("JellyfinClient", () => {
     vi.unstubAllGlobals();
   });
 
+  it("gets one user with an encoded path segment and no query", async () => {
+    const user = { Id: "user-1", Name: "Example" };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(user), { status: 200 }));
+
+    expect(await client.getUser("user/with ?query=#% &é")).toEqual(user);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://jellyfin.test/Users/user%2Fwith%20%3Fquery%3D%23%25%20%26%C3%A9");
+    expect(options.method ?? "GET").toBe("GET");
+    expect(options.body).toBeUndefined();
+  });
+
   it("sends the MediaBrowser Authorization token on requests", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ ServerName: "Test", Version: "12.0.0", Id: "abc" }), {

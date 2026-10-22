@@ -7,7 +7,9 @@ import {
   TOOL_REMOTE_POLICIES,
 } from "../src/http.js";
 import type { JellyfinConfig } from "../src/config.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { JellyfinClient } from "../src/client.js";
+import { registerUserTools } from "../src/tools/users.js";
 import { captureRegisteredToolNames } from "../src/server.js";
 import { Readable } from "node:stream";
 import { EventEmitter } from "node:events";
@@ -124,7 +126,7 @@ describe("HTTP transport configuration", () => {
 describe("HTTP remote tool policy", () => {
   it("classifies every registered tool exactly once", () => {
     const registered = captureRegisteredToolNames();
-    expect(registered).toHaveLength(57);
+    expect(registered).toHaveLength(58);
     expect(Object.keys(TOOL_REMOTE_POLICIES).sort()).toEqual([...registered].sort());
   });
 
@@ -195,6 +197,46 @@ describe("HTTP transport", () => {
       await client.connect(transport);
       expect((await client.listTools()).tools.some((tool) => tool.name === "jellyfin_get_status")).toBe(true);
       expect(transport.sessionId).toBeUndefined();
+    } finally {
+      await client.close();
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("dispatches get-user in observe mode over MCP with a mocked Jellyfin client", async () => {
+    const getUser = vi.fn().mockResolvedValue({
+      Id: "user-1", Name: "Example", HasPassword: false, Policy: { IsDisabled: false },
+    });
+    const handler = createHttpRequestHandler(
+      { ...getHttpConfig(), remoteMode: "observe" }, undefined,
+      () => {
+        const server = new McpServer({ name: "user-policy-test", version: "1" });
+        registerUserTools(server, { getUser } as unknown as JellyfinClient);
+        return { server, dispose: () => server.close() };
+      },
+    );
+    const server = createServer(createHttpListener(handler));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const client = new Client({ name: "http-user-policy-test", version: "1" });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("No HTTP port");
+      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`), {
+        requestInit: { headers: { authorization: `Bearer ${env.JELLYFIN_MCP_HTTP_TOKEN}` } },
+      }));
+      const result = await client.callTool({ name: "jellyfin_get_user", arguments: { userId: "user-1" } });
+      expect(result.isError).toBeUndefined();
+      const content = result.content as { type: string; text: string }[];
+      expect(JSON.parse(content[0].text)).toMatchObject({
+        id: "user-1", name: "Example", hasPassword: false, policy: { isDisabled: false },
+      });
+      expect(getUser).toHaveBeenCalledExactlyOnceWith("user-1");
+      for (const userId of [undefined, "", " ", "\t\n"]) {
+        const rejected = await client.callTool({ name: "jellyfin_get_user", arguments: { userId } });
+        expect(rejected.isError).toBe(true);
+      }
+      expect(getUser).toHaveBeenCalledOnce();
     } finally {
       await client.close();
       server.closeAllConnections();
