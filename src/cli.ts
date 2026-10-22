@@ -525,7 +525,7 @@ function dispatch(
         return emit(r, () => renderUserData(r), parsed.json);
       }
       case "activity": {
-        const r = yield* fromPromise(() => client.getActivityLog(parsed.limit, parsed.minDate));
+        const r = yield* fromPromise(() => client.getActivityLog({ limit: parsed.limit, minDate: parsed.minDate }));
         return emit(r, () => renderActivity(r), parsed.json);
       }
       case "tasks": {

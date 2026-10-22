@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `jellyfin_get_activity_log` supports pagination, date and user filters, severity,
+  type, name, and sorting, and returns page offsets and item IDs. Client activity
+  requests are capped at 200 entries.
 - `jellyfin_get_item` requires `userId`, and CLI `jellyctrl item <itemId>`
   requires `--user <id>` for user-scoped item visibility and state.
 - README rewritten to the adoption-upgrade standard: a what / why / how-it-differs

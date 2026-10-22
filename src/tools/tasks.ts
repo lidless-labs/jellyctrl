@@ -50,20 +50,30 @@ export function registerTaskTools(server: McpServer, client: JellyfinClient): vo
 
   server.tool(
     "jellyfin_get_activity_log",
-    "Get recent entries from Jellyfin's activity log (playback start/stop, login events, plugin updates, errors).",
+    "Get a page of Jellyfin activity log entries with optional date, user, severity, type, and name filters and sorting.",
     {
       limit: z.number().int().positive().max(200).optional().default(20),
+      startIndex: z.number().int().nonnegative().optional().default(0),
       minDate: z
         .string()
         .optional()
         .describe("ISO 8601 timestamp - only return entries newer than this (e.g. 2026-04-19T00:00:00Z)"),
+      maxDate: z.string().optional().describe("ISO 8601 timestamp - only return entries older than this."),
+      hasUserId: z.boolean().optional().describe("Filter entries by whether they have a user ID."),
+      username: z.string().optional().describe("Filter by username."),
+      severity: z.enum(["Trace", "Debug", "Information", "Warning", "Error", "Critical", "None"]).optional(),
+      type: z.string().optional().describe("Filter by activity type."),
+      name: z.string().optional().describe("Filter by activity name."),
+      sortBy: z.string().optional().describe("Jellyfin activity sort field, or comma-separated fields: Name, Overiew, ShortOverview, Type, DateCreated, Username, LogSeverity."),
+      sortOrder: z.enum(["Ascending", "Descending"]).optional(),
     },
-    READ_ONLY,
-    toToolHandler(({ limit, minDate }) =>
+    { ...READ_ONLY, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    toToolHandler((options) =>
       toolResult(Effect.gen(function* () {
-        const log = yield* fromPromise(() => client.getActivityLog(limit, minDate));
+        const log = yield* fromPromise(() => client.getActivityLog(options));
         return ok({
           totalCount: log.TotalRecordCount,
+          startIndex: log.StartIndex ?? options.startIndex,
           entries: log.Items.map((e) => ({
             id: e.Id,
             date: e.Date,
@@ -71,6 +81,7 @@ export function registerTaskTools(server: McpServer, client: JellyfinClient): vo
             type: e.Type,
             name: e.Name,
             userId: e.UserId ?? null,
+            itemId: e.ItemId ?? null,
             summary: e.ShortOverview ?? null,
             detail: e.Overview ?? null,
           })),

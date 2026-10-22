@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { JellyfinClient } from "../src/client.js";
+import type { ActivityLogOptions } from "../src/types.js";
 
 const fetchMock = vi.fn();
 
@@ -674,4 +675,57 @@ describe("JellyfinClient", () => {
     expect(parsed.searchParams.get("code")).toBe("A B&C=D");
     expect(parsed.searchParams.get("userId")).toBe("user/42?x");
   });
+
+  describe("getActivityLog", () => {
+    it.each<[string, ActivityLogOptions | undefined, string]>([
+      ["defaults", undefined, "limit=20"],
+      ["limit", { limit: 50 }, "limit=50"],
+      ["limit cap", { limit: 201 }, "limit=200"],
+      ["zero offset", { startIndex: 0 }, "limit=20&startIndex=0"],
+      ["offset", { startIndex: 40 }, "limit=20&startIndex=40"],
+      ["minDate", { minDate: "2026-01-01T00:00:00Z" }, "limit=20&minDate=2026-01-01T00%3A00%3A00Z"],
+      ["maxDate", { maxDate: "2026-02-01T00:00:00Z" }, "limit=20&maxDate=2026-02-01T00%3A00%3A00Z"],
+      ["hasUserId false", { hasUserId: false }, "limit=20&hasUserId=false"],
+      ["hasUserId true", { hasUserId: true }, "limit=20&hasUserId=true"],
+      ["username", { username: "example user&admin" }, "limit=20&username=example+user%26admin"],
+      ["severity", { severity: "Warning" }, "limit=20&severity=Warning"],
+      ["type", { type: "Video Playback/Start" }, "limit=20&type=Video+Playback%2FStart"],
+      ["name", { name: "Example + episode?" }, "limit=20&name=Example+%2B+episode%3F"],
+      ["sortBy", { sortBy: "DateCreated,Name" }, "limit=20&sortBy=DateCreated%2CName"],
+      ["sortOrder", { sortOrder: "Descending" }, "limit=20&sortOrder=Descending"],
+      ["combined filters", {
+        startIndex: 0,
+        limit: 200,
+        minDate: "2026-01-01T00:00:00Z",
+        maxDate: "2026-02-01T00:00:00Z",
+        hasUserId: false,
+        username: "example user&admin",
+        severity: "Error",
+        type: "Video/Start",
+        name: "Example + episode?",
+        sortBy: "DateCreated,Name",
+        sortOrder: "Ascending",
+      }, "limit=200&startIndex=0&minDate=2026-01-01T00%3A00%3A00Z&maxDate=2026-02-01T00%3A00%3A00Z&hasUserId=false&username=example+user%26admin&severity=Error&type=Video%2FStart&name=Example+%2B+episode%3F&sortBy=DateCreated%2CName&sortOrder=Ascending"],
+    ])("serializes %s with the upstream query names", async (_name, options, query) => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ Items: [], TotalRecordCount: 0 }), { status: 200 }),
+      );
+
+      await client.getActivityLog(options);
+
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0][0]).toBe(`http://jellyfin.test/System/ActivityLog/Entries?${query}`);
+    });
+
+    it.each([-1, 1.5, NaN, Infinity])("rejects invalid startIndex %s before fetching", async (startIndex) => {
+      await expect(client.getActivityLog({ startIndex })).rejects.toThrow("startIndex must be a nonnegative integer");
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it.each([0, -1, 1.5, NaN, Infinity])("rejects invalid limit %s before fetching", async (limit) => {
+      await expect(client.getActivityLog({ limit })).rejects.toThrow("limit must be a positive integer");
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
 });
