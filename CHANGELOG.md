@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `jellyfin_list_plugins` - inventory installed plugins by status.
 - `jellyfin_get_favorite_items` — user's favorite items, with optional type
   filtering and pagination.
 - Maintainer health files: `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,

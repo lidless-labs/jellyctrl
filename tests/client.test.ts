@@ -37,6 +37,15 @@ describe("JellyfinClient", () => {
     expect(headers["Authorization"]).toBe('MediaBrowser Token="test-key"');
   });
 
+  it("lists plugins with one GET to /Plugins", async () => {
+    const plugins = [{ Id: "p1", Name: "Demo", Version: "1.0", Status: "Active" }];
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(plugins), { status: 200 }));
+
+    await expect(client.listPlugins()).resolves.toEqual(plugins);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe("http://jellyfin.test/Plugins");
+  });
+
   it("surfaces 401 with a clear message", async () => {
     fetchMock.mockResolvedValueOnce(new Response("nope", { status: 401 }));
     await expect(client.getSystemInfo()).rejects.toThrow(/Invalid API key/);
