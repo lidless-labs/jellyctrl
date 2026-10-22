@@ -37,6 +37,26 @@ describe("JellyfinClient", () => {
     expect(headers["Authorization"]).toBe('MediaBrowser Token="test-key"');
   });
 
+  it.each([
+    { method: "listApiKeys" as const, userId: undefined, path: "/Auth/Keys" },
+    { method: "listDevices" as const, userId: undefined, path: "/Devices" },
+    {
+      method: "listDevices" as const, userId: "example user/one?&=+#",
+      path: "/Devices?userId=example%20user%2Fone%3F%26%3D%2B%23",
+    },
+  ])("$method sends one GET to $path", async ({ method, userId, path }) => {
+    const response = { Items: [], TotalRecordCount: 0 };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(response)));
+
+    expect(await client[method](userId)).toEqual(response);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`http://jellyfin.test${path}`);
+    expect(init.method ?? "GET").toBe("GET");
+    expect(init.body).toBeUndefined();
+  });
+
   it("surfaces 401 with a clear message", async () => {
     fetchMock.mockResolvedValueOnce(new Response("nope", { status: 401 }));
     await expect(client.getSystemInfo()).rejects.toThrow(/Invalid API key/);

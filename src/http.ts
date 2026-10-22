@@ -18,6 +18,8 @@ type ToolPolicy = "read" | "routine" | "high-impact";
 
 export const TOOL_REMOTE_POLICIES: Record<string, ToolPolicy> = {
   jellyfin_get_status: "read",
+  jellyfin_list_api_keys: "read",
+  jellyfin_list_devices: "read",
   jellyfin_restart_server: "high-impact",
   jellyfin_shutdown_server: "high-impact",
   jellyfin_list_libraries: "read",

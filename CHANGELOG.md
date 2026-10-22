@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `jellyfin_list_api_keys` and `jellyfin_list_devices` for read-only access
+  inventory, with optional device filtering by user ID. Results include only
+  inventory metadata and omit access tokens. Both tools support HTTP observe mode.
+
 - `jellyfin_get_favorite_items` — user's favorite items, with optional type
   filtering and pagination.
 - Maintainer health files: `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
