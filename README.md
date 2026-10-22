@@ -199,7 +199,7 @@ Do not expose this listener directly or change it to a non-loopback bind. For re
 ### Tasks & Activity
 - `jellyfin_list_scheduled_tasks`
 - `jellyfin_run_scheduled_task` (requires `confirm: true`)
-- `jellyfin_get_activity_log`
+- `jellyfin_get_activity_log` - paginated activity with date, user, severity, type, and name filters and sorting. Returns `totalCount`, `startIndex`, and entries with `itemId` (null when absent). Defaults to 20 entries, maximum 200.
 
 ## CLI
 
