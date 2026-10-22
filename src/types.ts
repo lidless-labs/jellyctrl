@@ -113,6 +113,39 @@ export interface ActivityLogResponse {
   TotalRecordCount: number;
 }
 
+export interface ApiKeyInfo {
+  Id?: number;
+  AppName?: string | null;
+  AppVersion?: string | null;
+  DeviceName?: string | null;
+  UserName?: string | null;
+  IsActive?: boolean;
+  DateCreated?: string;
+  DateRevoked?: string | null;
+  DateLastActivity?: string;
+}
+
+export interface ApiKeysResponse {
+  Items: ApiKeyInfo[];
+  TotalRecordCount: number;
+}
+
+export interface DeviceInfo {
+  Id?: string | null;
+  Name?: string | null;
+  CustomName?: string | null;
+  AppName?: string | null;
+  AppVersion?: string | null;
+  LastUserName?: string | null;
+  LastUserId?: string | null;
+  DateLastActivity?: string | null;
+}
+
+export interface DevicesResponse {
+  Items: DeviceInfo[];
+  TotalRecordCount: number;
+}
+
 export interface ScheduledTask {
   Id: string;
   Name: string;

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { JellyfinClient } from "../src/client.js";
 import { getHttpConfig } from "../src/config.js";
 import {
   createHttpListener,
@@ -124,7 +125,7 @@ describe("HTTP transport configuration", () => {
 describe("HTTP remote tool policy", () => {
   it("classifies every registered tool exactly once", () => {
     const registered = captureRegisteredToolNames();
-    expect(registered).toHaveLength(57);
+    expect(registered).toHaveLength(59);
     expect(Object.keys(TOOL_REMOTE_POLICIES).sort()).toEqual([...registered].sort());
   });
 
@@ -195,6 +196,48 @@ describe("HTTP transport", () => {
       await client.connect(transport);
       expect((await client.listTools()).tools.some((tool) => tool.name === "jellyfin_get_status")).toBe(true);
       expect(transport.sessionId).toBeUndefined();
+    } finally {
+      await client.close();
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("allows both access inventory tools over HTTP in observe mode", async () => {
+    const apiKeys = vi.spyOn(JellyfinClient.prototype, "listApiKeys").mockResolvedValue({
+      Items: [{ Id: 7, AppName: "Example integration", IsActive: false,
+        DateCreated: "2026-01-01T00:00:00Z", DateLastActivity: "2026-01-02T00:00:00Z" }],
+      TotalRecordCount: 1,
+    });
+    const devices = vi.spyOn(JellyfinClient.prototype, "listDevices").mockResolvedValue({
+      Items: [{ Id: "device-1", Name: "Example device" }], TotalRecordCount: 1,
+    });
+    const server = createServer(createHttpListener(createHttpRequestHandler({
+      ...getHttpConfig(), remoteMode: "observe",
+    })));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const client = new Client({ name: "http-access-test", version: "1" });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("No HTTP port");
+      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`), {
+        requestInit: { headers: { authorization: `Bearer ${env.JELLYFIN_MCP_HTTP_TOKEN}` } },
+      }));
+      const keys = await client.callTool({ name: "jellyfin_list_api_keys", arguments: {} });
+      expect(keys.isError).not.toBe(true);
+      expect(keys.content).toEqual([{ type: "text", text: JSON.stringify({
+        totalCount: 1, apiKeys: [{ id: 7, appName: "Example integration", appVersion: null,
+          deviceName: null, userName: null, isActive: false, dateCreated: "2026-01-01T00:00:00Z",
+          dateRevoked: null, dateLastActivity: "2026-01-02T00:00:00Z" }],
+      }, null, 2) }]);
+      const result = await client.callTool({ name: "jellyfin_list_devices", arguments: { userId: "example-user" } });
+      expect(result.isError).not.toBe(true);
+      expect(result.content).toEqual([{ type: "text", text: JSON.stringify({
+        totalCount: 1, devices: [{ id: "device-1", name: "Example device", customName: null,
+          appName: null, appVersion: null, lastUserName: null, lastUserId: null, dateLastActivity: null }],
+      }, null, 2) }]);
+      expect(apiKeys).toHaveBeenCalledExactlyOnceWith();
+      expect(devices).toHaveBeenCalledExactlyOnceWith("example-user");
     } finally {
       await client.close();
       server.closeAllConnections();
