@@ -110,7 +110,24 @@ describe("parseArgs", () => {
       json: false,
       playlistId: "pl1",
       userId: "u1",
+      limit: 100,
+      startIndex: 0,
     });
+  });
+
+  it("parses later playlist pages", () => {
+    expect(parseArgs(["playlist", "pl1", "--user", "u1", "--limit", "25", "--start-index", "100"])).toEqual({
+      kind: "playlist", json: false, playlistId: "pl1", userId: "u1", limit: 25, startIndex: 100,
+    });
+  });
+
+  it.each([
+    ["--limit", "0"], ["--limit", "101"], ["--limit", "1.5"],
+    ["--start-index", "-1"], ["--start-index", "0.5"],
+  ])("rejects invalid playlist %s %s", (flag, value) => {
+    expect(() => parseArgs(["playlist", "pl1", "--user", "u1", flag, value])).toThrow(
+      `${flag} must be an integer in [${flag === "--limit" ? "1, 100" : "0, 2147483647"}]`,
+    );
   });
 
   it("routes help, version, and mcp", () => {
@@ -193,6 +210,28 @@ describe("run", () => {
     const { deps } = capture(client);
     expect(await run(["search", "the wire", "--type", "Series", "--limit", "7"], deps)).toBe(0);
     expect(client.searchItems).toHaveBeenCalledWith("the wire", "Series", 7);
+  });
+
+  it.each([
+    { options: [], limit: 100, startIndex: 0 },
+    { options: ["--limit", "25", "--start-index", "100"], limit: 25, startIndex: 100 },
+  ])("passes playlist paging to the client and renders entry IDs at $startIndex", async ({ options, limit, startIndex }) => {
+    const client = { getPlaylistItems: vi.fn().mockResolvedValue({
+      TotalRecordCount: 350, StartIndex: startIndex,
+      Items: [{ Id: "i1", Name: "Track", Type: "Audio", PlaylistItemId: "entry-101" }],
+    }) };
+    const { out, deps } = capture(client);
+    expect(await run(["playlist", "pl1", "--user", "u1", ...options], deps)).toBe(0);
+    expect(client.getPlaylistItems).toHaveBeenCalledExactlyOnceWith("pl1", "u1", limit, startIndex);
+    expect(out.join("\n")).toContain("entryId=entry-101");
+    expect(out.join("\n")).toContain(`1 of 350 item(s), startIndex=${startIndex}`);
+  });
+
+  it("documents playlist page bounds in human help", async () => {
+    const { out, deps } = capture();
+    expect(await run(["playlist", "--help"], deps)).toBe(0);
+    expect(out.join("\n")).toContain("playlist   --limit <n>              Page size, 1-100              (default 100)");
+    expect(out.join("\n")).toContain("--start-index <n>        Page offset, 0 or greater      (default 0)");
   });
 
   it("filters sessions to active-only without touching the server", async () => {

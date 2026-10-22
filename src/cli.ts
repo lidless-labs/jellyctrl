@@ -48,7 +48,7 @@ export type Parsed =
   | { kind: "activity"; json: boolean; limit: number; minDate?: string }
   | { kind: "tasks"; json: boolean }
   | { kind: "playlists"; json: boolean; userId: string }
-  | { kind: "playlist"; json: boolean; playlistId: string; userId: string };
+  | { kind: "playlist"; json: boolean; playlistId: string; userId: string; limit: number; startIndex: number };
 
 export const HELP = `jellyctrl - read-only control CLI for a Jellyfin media server
 
@@ -79,7 +79,7 @@ Per-user discovery & history:
 
 Playlists:
   playlists --user <id>      List playlists visible to a user
-  playlist <playlistId> --user <id>   Items in a playlist, in order
+  playlist <playlistId> --user <id>   One page of playlist items, in order
 
 Other:
   mcp                        Start the MCP server over stdio
@@ -104,6 +104,8 @@ Command options:
              --limit <n>              Max results, 1-200            (default 20)
   activity   --limit <n>              Max entries, 1-200            (default 20)
              --min-date <iso>         Only entries newer than this ISO 8601 timestamp
+  playlist   --limit <n>              Page size, 1-100              (default 100)
+             --start-index <n>        Page offset, 0 or greater      (default 0)
 
 Environment:
   JELLYFIN_URL          Base URL (e.g. http://192.0.2.10:8096)            [required]
@@ -250,9 +252,11 @@ export function parseArgs(argv: string[]): Parsed {
     }
     case "playlist": {
       const userId = requireOption(args, "--user");
+      const limit = requireInt(takeOption(args, "--limit"), "--limit", 1, 100, 100);
+      const startIndex = requireInt(takeOption(args, "--start-index"), "--start-index", 0, 2147483647, 0);
       const playlistId = takePositional(args, "<playlistId>");
       ensureNoExtra(args);
-      return { kind: "playlist", json, playlistId, userId };
+      return { kind: "playlist", json, playlistId, userId, limit, startIndex };
     }
     default:
       throw new UsageError(`Unknown command: ${cmd}`);
@@ -379,9 +383,8 @@ function renderPlaylists(resp: ItemsResponse): string {
   return lines.join("\n");
 }
 
-function renderPlaylistItems(resp: ItemsResponse): string {
-  if (!resp.Items.length) return "Playlist is empty.";
-  const lines = [`${resp.Items.length} item(s):`];
+function renderPlaylistItems(resp: ItemsResponse, startIndex: number): string {
+  const lines = [`${resp.Items.length} of ${resp.TotalRecordCount} item(s), startIndex=${resp.StartIndex ?? startIndex}:`];
   for (const i of resp.Items) {
     const entryId = (i as { PlaylistItemId?: string }).PlaylistItemId ?? "?";
     const series = i.SeriesName ? `${i.SeriesName} - ` : "";
@@ -538,9 +541,9 @@ function dispatch(
       }
       case "playlist": {
         const r = yield* fromPromise(() =>
-          client.getPlaylistItems(parsed.playlistId, parsed.userId),
+          client.getPlaylistItems(parsed.playlistId, parsed.userId, parsed.limit, parsed.startIndex),
         );
-        return emit(r, () => renderPlaylistItems(r), parsed.json);
+        return emit(r, () => renderPlaylistItems(r, parsed.startIndex), parsed.json);
       }
     }
   });

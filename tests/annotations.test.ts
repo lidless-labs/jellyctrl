@@ -15,7 +15,7 @@ import { registerQuickConnectTools } from "../src/tools/quickconnect.js";
 // Fake McpServer that records the annotations each tool registers with. Tool
 // registration is positional: (name, description, schema, annotations, handler).
 interface Captured {
-  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean };
 }
 
 function captureAllTools(): Map<string, Captured> {
@@ -65,12 +65,16 @@ const READ_ONLY_TOOLS = [
 ];
 
 const DESTRUCTIVE_TOOLS = [
+  "jellyfin_mark_played",
+  "jellyfin_mark_unplayed",
+  "jellyfin_unset_favorite",
   "jellyfin_restart_server",
   "jellyfin_shutdown_server",
   "jellyfin_delete_user",
   "jellyfin_set_user_disabled",
   "jellyfin_set_user_password",
   "jellyfin_stop_session",
+  "jellyfin_play_on_session",
   "jellyfin_pause_all_sessions",
   "jellyfin_stop_all_sessions",
   "jellyfin_message_all_active_sessions",
@@ -98,6 +102,16 @@ describe("MCP tool annotations", () => {
         typeof tool.annotations!.readOnlyHint,
         `${name} is missing readOnlyHint`,
       ).toBe("boolean");
+    }
+  });
+
+  it("publishes complete hints without promising write idempotence", () => {
+    for (const [name, tool] of tools) {
+      expect(tool.annotations, name).toMatchObject({
+        readOnlyHint: expect.any(Boolean), destructiveHint: expect.any(Boolean),
+        idempotentHint: tool.annotations!.readOnlyHint === true,
+        openWorldHint: true,
+      });
     }
   });
 

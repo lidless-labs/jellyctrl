@@ -30,13 +30,15 @@ export function registerUserTools(server: McpServer, client: JellyfinClient): vo
 
   server.tool(
     "jellyfin_create_user",
-    "Create a new Jellyfin user. Returns the new user's ID. Pass a password separately via jellyfin_set_user_password.",
+    "Create a new Jellyfin user. Returns the new user's ID. Pass a password separately via jellyfin_set_user_password. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       name: z.string().min(1).describe("Username for the new account"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ name }) =>
+    toToolHandler(({ confirm, name }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("create user");
         const user = yield* fromPromise(() => client.createUser(name));
         return ok({
           id: user.Id,

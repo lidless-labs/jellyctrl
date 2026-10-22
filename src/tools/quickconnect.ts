@@ -5,16 +5,8 @@ import type { JellyfinClient } from "../client.js";
 import { fromPromise, toolResult, toToolHandler } from "../effect/tool-adapter.js";
 import { ok, fail, refuseUnconfirmed, DESTRUCTIVE, READ_ONLY } from "./_util.js";
 
-// The underlying JellyfinClient.request() surfaces the failed path in the error
-// message (e.g. "Resource not found: /QuickConnect/Authorize?code=ABC123&userId=…").
-// If we hand that error straight to fail(), the short-lived Quick Connect code
-// lands in tool output / logs. Replace every encoding the code could appear in:
-//   - raw                                  ("A B&C=D")
-//   - encodeURIComponent                   ("A%20B%26C%3DD") - used by most code paths
-//   - URLSearchParams form-encoding        ("A+B%26C%3DD")   - URLSearchParams encodes ' ' as '+'
-// Belt-and-suspenders because plain 6-char codes don't need encoding, but
-// codes with edge-case characters should never leak regardless of which
-// encoding path produced the failing URL.
+// Redact authorization codes even if an alternate client returns an error
+// containing the code. Cover raw, percent-encoded and form-encoded values.
 function redactSecretFromError(error: unknown, secret: string): Error {
   const rawMessage = error instanceof Error ? error.message : String(error);
   // Derive the URLSearchParams encoding by round-tripping through a one-field

@@ -35,8 +35,8 @@ jobs:
       - run: npm test
 
   audit:
-    # Production dependency audit gate (#12). Fails only on high or critical
-    # advisories filed against a direct runtime dependency.
+    # Production dependency audit gate. Fails on high or critical advisories
+    # in direct and transitive runtime dependencies.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

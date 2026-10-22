@@ -4,6 +4,7 @@ import type { JellyfinConfig } from "./config.js";
 import {
   JellyfinHttpError,
   JellyfinParseError,
+  JellyfinResponseSizeError,
   JellyfinTimeoutError,
   JellyfinTransportError,
   type JellyfinRequestError,
@@ -31,6 +32,53 @@ export const secondsToTicks = (seconds: number): number =>
 
 const isNotFoundError = (error: unknown): boolean =>
   error instanceof Error && error.message.startsWith("Resource not found:");
+
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+
+function cancelBody(response: Response): void {
+  void response.body?.cancel().catch(() => {});
+}
+
+async function readBoundedBody(response: Response, controller: AbortController): Promise<string> {
+  const length = response.headers.get("content-length");
+  if (length !== null && /^\d+$/.test(length.trim()) && Number(length) > MAX_RESPONSE_BYTES) {
+    cancelBody(response);
+    controller.abort();
+    throw new JellyfinResponseSizeError({ limit: MAX_RESPONSE_BYTES });
+  }
+  if (!response.body) return "";
+
+  const reader = response.body.getReader();
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  controller.signal.addEventListener("abort", cancel, { once: true });
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      controller.signal.throwIfAborted();
+      const { done, value } = await reader.read();
+      controller.signal.throwIfAborted();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_RESPONSE_BYTES) {
+        controller.abort();
+        throw new JellyfinResponseSizeError({ limit: MAX_RESPONSE_BYTES });
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder().decode(bytes);
+  } finally {
+    controller.signal.removeEventListener("abort", cancel);
+    cancel();
+    reader.releaseLock();
+  }
+}
 
 export class JellyfinClient {
   private baseUrl: string;
@@ -76,6 +124,7 @@ export class JellyfinClient {
     parseJson = true,
   ): Effect.Effect<T, JellyfinRequestError, never> {
     const url = `${this.baseUrl}${path}`;
+    const safePath = path.split("?")[0];
 
     // Jellyfin/Emby authenticate via the MediaBrowser authorization scheme.
     // For a static API key we only need the Token field; the Client/Device/
@@ -111,51 +160,39 @@ export class JellyfinClient {
             } as RequestInit & { dispatcher?: Agent });
 
             if (!response.ok) {
-              const body = await response.text().catch(() => "");
-              const error = mapHttpError(path, response, body);
-              // The raw downstream body can carry internal Jellyfin detail (stack
-              // traces, internal paths, IDs). fail() returns thrown messages verbatim
-              // to the LLM/MCP client, so log the full body server-side (stderr) for
-              // operators and surface only the status-derived summary to the client,
-              // matching the Quick Connect secret-redaction posture elsewhere.
-              if (body) {
-                console.error(
-                  `jellyfin-mcp: HTTP ${response.status} from ${path}: ${body}`,
-                );
-              }
-              throw error;
+              cancelBody(response);
+              console.error(`jellyfin-mcp: upstream request failed (HTTP ${response.status})`);
+              throw mapHttpError(safePath, response);
             }
 
-            if (!parseJson) {
+            // Empty and unused bodies do not need to be buffered.
+            if (!parseJson || response.status === 204) {
+              cancelBody(response);
               return undefined as T;
             }
 
-            // Some POST endpoints (e.g. /Sessions/{id}/Playing/Pause) return 204 No Content.
-            if (response.status === 204) {
-              return undefined as T;
-            }
-
-            const text = await response.text();
+            const text = await readBoundedBody(response, controller);
             if (!text) {
               return undefined as T;
             }
             try {
               return JSON.parse(text) as T;
             } catch (cause) {
-              throw new JellyfinParseError({ path, cause });
+              throw new JellyfinParseError({ path: safePath, cause });
             }
           },
           catch: (error) => {
             if (
               error instanceof JellyfinHttpError ||
-              error instanceof JellyfinParseError
+              error instanceof JellyfinParseError ||
+              error instanceof JellyfinResponseSizeError
             ) {
               return error;
             }
             if (error instanceof Error && error.name === "AbortError") {
-              return new JellyfinTimeoutError({ path, timeout: this.timeout });
+              return new JellyfinTimeoutError({ path: safePath, timeout: this.timeout });
             }
-            return new JellyfinTransportError({ path, cause: error });
+            return new JellyfinTransportError({ path: safePath, cause: error });
           },
         }),
       ({ timeoutId }) => Effect.sync(() => clearTimeout(timeoutId)),
@@ -168,6 +205,9 @@ export class JellyfinClient {
     }
     if (error instanceof JellyfinTimeoutError) {
       return new Error(`Request to ${error.path} timed out after ${error.timeout}ms`);
+    }
+    if (error instanceof JellyfinResponseSizeError) {
+      return new Error(`Jellyfin response exceeds the ${error.limit}-byte limit`);
     }
     if (error instanceof JellyfinParseError) {
       return new Error("Jellyfin returned invalid JSON");
@@ -715,8 +755,18 @@ export class JellyfinClient {
     });
   }
 
-  async getPlaylistItems(playlistId: string, userId: string): Promise<ItemsResponse> {
-    const params = new URLSearchParams({ UserId: userId });
+  async getPlaylistItems(playlistId: string, userId: string, limit = 100, startIndex = 0): Promise<ItemsResponse> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError("Playlist limit must be an integer in [1, 100]");
+    }
+    if (!Number.isInteger(startIndex) || startIndex < 0) {
+      throw new RangeError("Playlist startIndex must be a nonnegative integer");
+    }
+    const params = new URLSearchParams({
+      UserId: userId,
+      Limit: String(limit),
+      StartIndex: String(startIndex),
+    });
     return this.request<ItemsResponse>(
       `/Playlists/${encodeURIComponent(playlistId)}/Items?${params.toString()}`,
     );
