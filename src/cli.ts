@@ -5,6 +5,7 @@ import { Cause, Effect, Exit } from "effect";
 import { JellyfinClient } from "./client.js";
 import { getConfig } from "./config.js";
 import { fromPromise } from "./effect/tool-adapter.js";
+import { getHealthBrief, healthBriefSchema, type HealthBriefOptions } from "./tools/health-brief.js";
 import type {
   ActivityLogResponse,
   Item,
@@ -34,6 +35,7 @@ export type Parsed =
   | { kind: "version" }
   | { kind: "mcp" }
   | { kind: "status"; json: boolean }
+  | { kind: "health-brief"; options: HealthBriefOptions }
   | { kind: "libraries"; json: boolean }
   | { kind: "users"; json: boolean }
   | { kind: "sessions"; json: boolean; activeOnly: boolean }
@@ -57,6 +59,7 @@ Usage:
 
 Server:
   status                     Server info (name, version, OS, pending restart)  [exit 1 if unreachable]
+  health-brief               Daily server health counts and exceptions (JSON)
   libraries                  List libraries (virtual folders) with paths
   tasks                      List scheduled tasks with state and last result
   activity                   Recent activity-log entries
@@ -91,6 +94,9 @@ Global options:
   --help, -h                 Show help
 
 Command options:
+  health-brief --window-hours <n>     Activity window, 1-168        (default 24)
+               --min-free-percent <n> Free-space warning percent  (default 15)
+               --min-free-gb <n>      Free-space warning in GB     (default 50)
   sessions   --active-only            Only sessions with a now-playing item
   search     --type <t,...>           Comma-separated item types (Movie,Series,Episode,...)
              --limit <n>              Max results, 1-200            (default 20)
@@ -174,6 +180,22 @@ export function parseArgs(argv: string[]): Parsed {
     case "status":
       ensureNoExtra(args);
       return { kind: "status", json };
+    case "health-brief": {
+      const flags = {
+        windowHours: "--window-hours", minFreePercent: "--min-free-percent", minFreeGb: "--min-free-gb",
+      } as const;
+      const options = Object.fromEntries(Object.entries(flags).map(([key, flag]) => {
+        const value = takeOption(args, flag);
+        return [key, value === undefined ? undefined : value.trim() ? Number(value) : NaN];
+      }));
+      ensureNoExtra(args);
+      const parsed = healthBriefSchema.safeParse(options);
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        throw new UsageError(`${flags[issue.path[0] as keyof typeof flags]}: ${issue.message}`);
+      }
+      return { kind: "health-brief", options: parsed.data };
+    }
     case "libraries":
       ensureNoExtra(args);
       return { kind: "libraries", json };
@@ -473,6 +495,11 @@ function dispatch(
         const ok = typeof r.Version === "string" && r.Version.length > 0;
         deps.out(parsed.json ? JSON.stringify(r, null, 2) : renderStatus(r));
         return ok ? 0 : 1;
+      }
+      case "health-brief": {
+        const brief = yield* fromPromise(() => getHealthBrief(client, parsed.options));
+        deps.out(JSON.stringify(brief));
+        return 0;
       }
       case "libraries": {
         const r = yield* fromPromise(() => client.listLibraries());

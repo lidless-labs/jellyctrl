@@ -128,7 +128,7 @@ describe("HTTP transport configuration", () => {
 describe("HTTP remote tool policy", () => {
   it("classifies every registered tool exactly once", () => {
     const registered = captureRegisteredToolNames();
-    expect(registered).toHaveLength(61);
+    expect(registered).toHaveLength(62);
     expect(Object.keys(TOOL_REMOTE_POLICIES).sort()).toEqual([...registered].sort());
   });
 

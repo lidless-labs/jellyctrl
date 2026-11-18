@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `jellyfin_health_brief` and `jellyctrl health-brief` summarize seven daily
+  health sections with counts, bounded exceptions, and partial results.
+
 ### Changed
 
 - Bumped `@lidless-labs/effect-operator-kit` to
