@@ -7,7 +7,6 @@ import type { Item, UserItemData } from "../types.js";
 import { fail, ok, refuseUnconfirmed, DESTRUCTIVE, NON_DESTRUCTIVE, READ_ONLY } from "./_util.js";
 
 const TICKS_PER_SECOND = 10_000_000;
-const MAX_EXPLICIT_ITEM_IDS = 100;
 const MAX_RESUME_PAGES = 4;
 const MAX_RESUME_ITEMS = 125;
 const ticksToSeconds = (ticks: number | undefined | null): number | null =>
@@ -240,7 +239,7 @@ function resultWithPartialFailure(payload: Record<string, unknown>) {
   return ok(payload);
 }
 
-const clearItemIdsSchema = z.array(z.string().trim().min(1)).min(1).max(MAX_EXPLICIT_ITEM_IDS).optional();
+const clearItemIdsSchema = z.array(z.string().trim().min(1)).min(1).max(MAX_RESUME_ITEMS).optional();
 const resumePageSizeSchema = z.number().int().min(25).max(500).default(100)
   .describe(`Resume queue page size when itemIds is omitted. The scan reads at most ${MAX_RESUME_PAGES} pages or ${MAX_RESUME_ITEMS} items.`);
 

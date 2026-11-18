@@ -39,13 +39,13 @@ describe.each([
   ["jellyfin_preview_continue_watching_clear", false],
   ["jellyfin_clear_continue_watching", true],
 ] as const)("%s bounds", (name, confirm) => {
-  it("rejects more than 100 explicit IDs and page sizes below 25", () => {
+  it("accepts 125 explicit IDs and rejects larger selections and page sizes below 25", () => {
     const { server, tools } = makeFakeServer();
     registerUserDataTools(server as never, new JellyfinClient({
       url: "https://jellyfin.test", apiKey: "test-key", verifySsl: true, timeout: 5000,
     }));
     const schema = z.object(tools.get(name)!.schema);
-    const itemIds = Array.from({ length: 100 }, (_, index) => `ep-${index}`);
+    const itemIds = Array.from({ length: 125 }, (_, index) => `ep-${index}`);
     expect(schema.safeParse({ userId: "u1", confirm, itemIds, pageSize: 25 }).success).toBe(true);
     expect(schema.safeParse({ userId: "u1", confirm, itemIds: [...itemIds, "extra"] }).success).toBe(false);
     expect(schema.safeParse({ userId: "u1", confirm, pageSize: 24 }).success).toBe(false);
