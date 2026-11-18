@@ -12,6 +12,7 @@ import {
 import { mapHttpError } from "./effect/request.js";
 import type {
   SystemInfo,
+  SystemStorage,
   PluginInfo,
   Library,
   User,
@@ -225,6 +226,10 @@ export class JellyfinClient {
   // ── System ────────────────────────────────────────────────────────────────
   async getSystemInfo(): Promise<SystemInfo> {
     return this.request<SystemInfo>("/System/Info");
+  }
+
+  async getSystemStorage(): Promise<SystemStorage> {
+    return this.request<SystemStorage>("/System/Info/Storage");
   }
 
   async listPlugins(): Promise<PluginInfo[]> {

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `jellyfin_health_brief` and `jellyctrl health-brief` summarize seven daily
+  health sections with counts, bounded exceptions, and partial results.
 - HTTP bearer tokens can be scoped to read, routine, or high-impact access.
   Each request uses its token's policy for tool discovery and calls, including
   batches. The legacy token still uses `JELLYFIN_MCP_REMOTE_MODE`.
