@@ -23,6 +23,24 @@ export interface PluginInfo {
   CanUninstall: boolean;
 }
 
+export interface FolderStorage {
+  Path: string;
+  DeviceId?: string | null;
+  UsedSpace: number;
+  FreeSpace: number;
+}
+
+export interface SystemStorage {
+  ProgramDataFolder?: FolderStorage;
+  WebFolder?: FolderStorage;
+  ImageCacheFolder?: FolderStorage;
+  CacheFolder?: FolderStorage;
+  LogFolder?: FolderStorage;
+  InternalMetadataFolder?: FolderStorage;
+  TranscodingTempFolder?: FolderStorage;
+  Libraries?: Array<{ Folders: FolderStorage[] }>;
+}
+
 export interface Library {
   Name: string;
   Locations: string[];
@@ -92,6 +110,7 @@ export interface Session {
   RemoteEndPoint?: string;
   NowPlayingItem?: NowPlayingItem;
   PlayState?: PlayState;
+  TranscodingInfo?: object | null;
   [key: string]: unknown;
 }
 
@@ -109,7 +128,6 @@ export interface Item {
   ProviderIds?: Record<string, string | null> | null;
   ImageTags?: Record<string, string | null> | null;
   MediaSourceCount?: number | null;
-  IsFolder?: boolean | null;
   RunTimeTicks?: number;
   // Episode-specific: season (ParentIndexNumber) and episode (IndexNumber).
   ParentIndexNumber?: number;
@@ -194,6 +212,8 @@ export interface DevicesResponse {
 export interface ScheduledTask {
   Id: string;
   Name: string;
+  Key?: string;
+  Triggers?: Array<{ Type: string; IntervalTicks?: number | null }>;
   Description?: string;
   Category?: string;
   State: string;
@@ -203,7 +223,7 @@ export interface ScheduledTask {
     EndTimeUtc?: string;
     Status?: string;
     ErrorMessage?: string;
-  };
+  } | null;
   [key: string]: unknown;
 }
 

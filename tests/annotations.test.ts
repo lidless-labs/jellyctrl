@@ -29,6 +29,7 @@ const READ_ONLY_TOOLS = [
   "jellyfin_list_devices",
   "jellyfin_get_status",
   "jellyfin_list_plugins",
+  "jellyfin_health_brief",
   "jellyfin_list_libraries",
   "jellyfin_list_library_items",
   "jellyfin_find_missing_metadata",
@@ -60,6 +61,7 @@ const DESTRUCTIVE_TOOLS = [
   "jellyfin_unset_favorite",
   "jellyfin_restart_server",
   "jellyfin_shutdown_server",
+  "jellyfin_scan_library",
   "jellyfin_delete_user",
   "jellyfin_set_user_disabled",
   "jellyfin_set_user_password",
@@ -81,8 +83,8 @@ const DESTRUCTIVE_TOOLS = [
 describe("MCP tool annotations", () => {
   const tools = captureAllTools();
 
-  it("registers all 65 tools", () => {
-    expect(tools.size).toBe(65);
+  it("registers all 66 tools", () => {
+    expect(tools.size).toBe(66);
   });
 
   it("every tool carries annotations with an explicit readOnlyHint", () => {

@@ -30,7 +30,7 @@
 
 jellyctrl is an operator control CLI for [Jellyfin](https://jellyfin.org), the free self-hosted media server. It gives shells, cron, CI, and agents a typed command surface for inspecting and operating a Jellyfin server without clicking through the dashboard. The same npm package is still published as `jellyfin-mcp` for compatibility, and the MCP adapter remains available through both `jellyctrl mcp` and the legacy `jellyfin-mcp` bin.
 
-You want it because asking "what's playing in the living room?" or running `jellyctrl sessions --active-only` is faster than dashboard hopping, and because an agent can chain those steps when launched through MCP. Compared with a generic HTTP tool or hand-written script, the MCP adapter exposes 65 schema-validated tools with `confirm: true` gates on every destructive operation and annotations that let clients route those calls to human approval.
+You want it because asking "what's playing in the living room?" or running `jellyctrl sessions --active-only` is faster than dashboard hopping, and because an agent can chain those steps when launched through MCP. Compared with a generic HTTP tool or hand-written script, the MCP adapter exposes 66 schema-validated tools with `confirm: true` gates on every destructive operation and annotations that let clients route those calls to human approval.
 
 > **Status: WIP.** Used daily against a real Jellyfin server, but the tool surface is still settling and breaking changes can land between minor versions. Pin a released version if you need stability.
 
@@ -40,7 +40,7 @@ Companion to [arr-cli](https://github.com/lidless-labs/arr-cli) (the *arr stack 
 
 Jellyfin is a free, self-hosted media server: your movies, shows, music, and photos on hardware you control. jellyctrl puts that media server's management surface in front of operators first: list sessions, inspect libraries, query users, search items, review activity, and script routine checks from the command line.
 
-For MCP-compatible clients, `jellyctrl mcp` exposes the same project as a stdio MCP server with 65 typed tools so an agent can list who is watching what, pause or cast a session, trigger a library scan, manage users, prune Continue Watching, run a scheduled task, or message a client, all as structured tool calls instead of raw REST. The MCP surface is read-and-write: discovery and reporting tools are read-only, while tools that change playback or records require `confirm: true`. The `jellyfin-mcp` command remains supported as a compatibility bin.
+For MCP-compatible clients, `jellyctrl mcp` exposes the same project as a stdio MCP server with 66 typed tools so an agent can list who is watching what, pause or cast a session, trigger a library scan, manage users, prune Continue Watching, run a scheduled task, or message a client, all as structured tool calls instead of raw REST. The MCP surface is read-and-write: discovery and reporting tools are read-only, while tools that change playback or records require `confirm: true`. The `jellyfin-mcp` command remains supported as a compatibility bin.
 
 ## Install
 
@@ -93,7 +93,7 @@ Then ask your agent: *"What's playing on Jellyfin right now?"* It will call `jel
 
 The default MCP transport is stdio. Use `jellyfin-mcp-http` when an MCP client needs Streamable HTTP on the same machine, or through an authenticated proxy whose origin runs on that machine. The listener accepts MCP JSON-RPC only at `POST /mcp`, has a non-sensitive `GET /healthz` response, and binds to loopback only.
 
-Set a separate bearer token. Do not reuse `JELLYFIN_API_KEY` for this token.
+Set at least one independent bearer token. Each configured token must be distinct from the others and from `JELLYFIN_API_KEY`, and must be at least 32 characters after trimming whitespace. Clients send their assigned token as `Authorization: Bearer <token>`.
 
 ```bash
 export JELLYFIN_URL=http://192.0.2.10:8096
@@ -108,18 +108,28 @@ The HTTP listener defaults to `127.0.0.1:3000`. Its configuration is intentional
 | --- | --- | --- |
 | `JELLYFIN_MCP_HTTP_HOST` | `127.0.0.1` | Loopback bind, only `127.0.0.1` or `::1`. Wildcards are refused |
 | `JELLYFIN_MCP_HTTP_PORT` | `3000` | TCP port, an integer from 1 to 65535 |
-| `JELLYFIN_MCP_HTTP_TOKEN` | Required | Independent bearer token, at least 32 characters after trimming whitespace. Send as `Authorization: Bearer <token>` |
-| `JELLYFIN_MCP_REMOTE_MODE` | `observe` | Tool policy fixed at process startup, never changed by an MCP request |
+| `JELLYFIN_MCP_HTTP_TOKEN` | Unset | Legacy bearer token, assigned the mode in `JELLYFIN_MCP_REMOTE_MODE` |
+| `JELLYFIN_MCP_REMOTE_MODE` | `observe` | Mode for the legacy token only |
+| `JELLYFIN_MCP_HTTP_TOKEN_READ` | Unset | Bearer token assigned `observe` mode |
+| `JELLYFIN_MCP_HTTP_TOKEN_ROUTINE` | Unset | Bearer token assigned `managed` mode |
+| `JELLYFIN_MCP_HTTP_TOKEN_HIGH_IMPACT` | Unset | Bearer token assigned `full` mode |
+
+You can keep the legacy token while adding scoped tokens. For example, a rendered environment file can give read and routine clients separate credentials:
+
+```dotenv
+JELLYFIN_MCP_HTTP_TOKEN_READ=<replace-with-distinct-read-bearer-token>
+JELLYFIN_MCP_HTTP_TOKEN_ROUTINE=<replace-with-distinct-routine-bearer-token>
+```
 
 Host and Origin checks run before `/healthz` and authentication. Host must identify a loopback alias or the bound host. Origin may be absent or an exact HTTP(S) loopback origin. Invalid headers receive 403 Forbidden.
 
-Remote modes provide a second server-side control in addition to each tool's existing `confirm: true` requirement:
+The server resolves the mode from the bearer token on every MCP request. It filters `tools/list` to that mode and rejects a batch before executing any of its calls if one violates the policy. Tool confirmation still applies after authorization.
 
 - `observe` permits only read tools.
 - `managed` also permits routine media, library, session, and user-data writes.
-- `full` permits every registered tool. High-impact tools still require their existing `confirm: true` argument.
+- `full` permits reads, routine writes, and high-impact tools. High-impact tools still require their existing `confirm: true` argument.
 
-In `managed` mode, the server denies restart, shutdown, account creation or deletion, password changes, account enable or disable, scheduled-task execution, session stop or stop-all, destructive playlist or collection removal, bulk resume clearing, and Quick Connect authorization. Unknown or unclassified tools are denied in every mode.
+In `managed` mode, the server denies item refresh, restart, shutdown, account creation or deletion, password changes, account enable or disable, scheduled-task execution, session stop or stop-all, destructive playlist or collection removal, bulk resume clearing, and Quick Connect authorization. Unknown or unclassified tools are denied in every mode.
 
 Do not expose this listener directly or change it to a non-loopback bind. For remote clients, keep the loopback origin and put an identity-aware proxy or tunnel in front of it. Keep the HTTP token as a second authentication layer, independent from the Jellyfin API key, and rotate it if a client or its logs may have exposed it.
 
@@ -128,7 +138,10 @@ Do not expose this listener directly or change it to a non-loopback bind. For re
 Playback controls, messages, account creation, user-data changes, and playlist or collection updates require `confirm: true`.
 
 ### System
-- `jellyfin_get_status` - server name, version, OS, pending restart, update availability
+- `jellyfin_get_status` - server name, version, OS, pending restart, update availability. A `null` restart or update flag means unknown.
+- `jellyfin_health_brief` - daily counts for server, sessions, tasks, storage, plugins, activity, and library scan freshness. Returns at most three exceptions per section and reports failed sources as `"unknown"`. Available in HTTP `observe` mode.
+  - `windowHours` defaults to 24 and accepts 1-168. Storage warns below `minFreePercent` (15 by default) or `minFreeGb` (50 decimal GB by default).
+  - Scan freshness flags an unsuccessful `RefreshLibrary` result as overdue. For a completed result, it uses the shortest recurring trigger interval. Without scan history, a usable completion time, or a recurring trigger, `overdue` is unknown (`null`).
 - `jellyfin_list_plugins` - installed plugin counts by status and summaries for non-Active plugins. Set `includeDetails: true` for all plugins with versions, descriptions, and uninstallability.
 - `jellyfin_restart_server` - restart the Jellyfin process *(requires `confirm: true`)*
 - `jellyfin_shutdown_server` - stop the Jellyfin process *(requires `confirm: true`)*
@@ -146,18 +159,18 @@ for absent optional metadata. The device total reflects all matching devices. Ea
 
 ### Libraries
 - `jellyfin_list_libraries` - all virtual folders with IDs, collection types, paths
-- `jellyfin_scan_library` - trigger a Jellyfin library scan
+- `jellyfin_scan_library` - queue a scan. Pass `confirm: true` for a full scan. Pass a `libraryId` from `jellyfin_list_libraries` to refresh one library without confirmation or forced replacement of metadata and images.
 - `jellyfin_list_library_items` - page through one library with a total and compact rows. Paths and overviews are opt-in.
-- `jellyfin_find_missing_metadata` - count missing overviews, Primary images and provider IDs, with up to five example IDs per reason.
+- `jellyfin_find_missing_metadata` - count missing overviews, Primary images and provider IDs, with up to five example IDs per reason. Scans movies, series and episodes by default. Set `includeItemTypes` to override the default.
 - `jellyfin_find_duplicates` - flag shared provider IDs, possible alternate editions and multi-version items for review.
-- `jellyfin_refresh_item` - queue an item refresh with `confirm: true`. Set either replacement flag to `true` to overwrite that category. Jellyfin controls folder recursion. The optional `recursive` flag checks the expected behavior before queuing.
+- `jellyfin_refresh_item` - queue an item refresh with `confirm: true`. Set either replacement flag to `true` to overwrite that category. Jellyfin decides whether to refresh descendants based on item type.
 
 Use a virtual folder ID from `jellyfin_list_libraries`. Pass `nextCursor` back as
 `cursor` with the same query. Each report scans up to 2,000 items per call. Counts
 describe the current window and are marked as lower bounds for the library whenever
 the report covers only part of it. Duplicate groups span Jellyfin pages within
-each window. Candidate group counts include both provider-ID groups and individual
-items with multiple media sources.
+each window. `providerGroups` counts shared provider-ID groups.
+`multiVersionItems` counts individual items with multiple media sources.
 
 ### Users
 - `jellyfin_list_users` - with admin / disabled flags and last login timestamps
@@ -243,7 +256,7 @@ Use the returned `totalCount` to decide whether to request another page.
 
 ## CLI
 
-`jellyctrl` is the primary operator interface for shells, cron, and CI. It shares the `JellyfinClient` core with the MCP adapter and reads the same env config. The current CLI exposes the read/report/lookup commands; playback control, user management, library scans, and other write operations stay in the MCP surface behind the `confirm: true` gates.
+`jellyctrl` is the primary operator interface for shells, cron, and CI. It shares the `JellyfinClient` core with the MCP adapter and reads the same env config. The CLI exposes read, report, and lookup commands. Playback control, user management, and library scanning are available through MCP. The text output of `jellyctrl status` shows `unknown` for absent restart or update flags.
 
 ```bash
 npx jellyfin-mcp@latest status
@@ -251,7 +264,7 @@ npx jellyfin-mcp@latest status
 jellyctrl status                                  # server info; exit 1 if unreachable
 jellyctrl libraries
 jellyctrl library-items 9a2d... --type Movie --limit 25
-jellyctrl missing-metadata 9a2d...
+jellyctrl missing-metadata 9a2d... --type Movie,Series
 jellyctrl duplicates 9a2d...
 jellyctrl users
 jellyctrl sessions --active-only
@@ -263,6 +276,7 @@ jellyctrl next-up --user 3f1c... --series 9a2d...
 jellyctrl similar 6e0b... --user 3f1c...
 jellyctrl history --user 3f1c... --type Movie,Episode
 jellyctrl user-data --user 3f1c... --item 6e0b...
+jellyctrl health-brief --window-hours 24 --min-free-percent 15 --min-free-gb 50
 jellyctrl activity --limit 50
 jellyctrl activity --include-details
 jellyctrl tasks
@@ -440,7 +454,7 @@ Then point `JELLYFIN_URL` at `http://localhost:8096`. The MCP itself has no SSH 
 
 - `jellyctrl` CLI for operator status, library, user, session, item, activity, task, playlist, history, and user-data checks
 - MCP adapter through `jellyctrl mcp` and the compatibility `jellyfin-mcp` bin
-- **65 MCP tools** covering system info, access inventory, libraries, users, sessions, items, scheduled tasks, user data writes, playlists, collections, discovery, and Quick Connect
+- **66 MCP tools** covering system info, access inventory, libraries, users, sessions, items, scheduled tasks, user data writes, playlists, collections, discovery, and Quick Connect
 - Access inventory: API-key metadata and devices, with optional device filtering by user ID
 - Playback control: pause / resume / stop / seek / next / previous / volume / mute / audio-stream / subtitle-stream / cast (remote-play) / send-message / bulk session controls
 - User data writes: mark watched/unwatched, add/remove favorites, preview or clear Continue Watching resume positions, set resume position
@@ -467,7 +481,7 @@ Calls `jellyfin_list_sessions`, finds the session by device name, then `jellyfin
 
 > Scan the Jellyfin libraries
 
-Calls `jellyfin_scan_library`.
+Calls `jellyfin_scan_library` with `confirm: true` after you confirm the full scan.
 
 > Send a message to my partner's Jellyfin that dinner is ready
 
@@ -507,7 +521,7 @@ Calls `jellyfin_list_users` to resolve the target user, then `jellyfin_quick_con
 
 ## Why not alternatives?
 
-- **Why not just call the Jellyfin REST API from a generic HTTP tool?** You can, but then the caller has to know the endpoint shapes, build query strings, and handle pagination and IDs by hand on every call. jellyctrl wraps useful read and reporting operations as stable CLI commands, and its MCP adapter exposes 65 named, schema-validated tools with descriptions, so a model picks `jellyfin_pause_session` instead of guessing at `POST /Sessions/{id}/Playing/Pause`. It also redacts upstream error bodies and Quick Connect codes before they reach the model.
+- **Why not just call the Jellyfin REST API from a generic HTTP tool?** You can, but then the caller has to know the endpoint shapes, build query strings, and handle pagination and IDs by hand on every call. jellyctrl wraps useful read and reporting operations as stable CLI commands, and its MCP adapter exposes 66 named, schema-validated tools with descriptions, so a model picks `jellyfin_pause_session` instead of guessing at `POST /Sessions/{id}/Playing/Pause`. It also redacts upstream error bodies and Quick Connect codes before they reach the model.
 - **Why not a shell script or a few curl aliases?** A script works for one fixed task. jellyctrl gives operators a reusable command surface, while the MCP adapter lets an agent compose steps it was not pre-programmed for ("find the living room session, see what's playing, pause it, then message my partner") and reuse the same tools across Claude Desktop, Claude Code, Codex CLI, OpenClaw, and any other MCP client.
 - **Why not the Jellyfin web dashboard?** The dashboard is for a human clicking. jellyctrl is for operators and agents acting through commands, natural language, and larger workflows alongside other tools.
 

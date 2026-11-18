@@ -60,8 +60,10 @@ function mockPages(items: Item[]) {
       const missing = ids.includes("no-overview") ? [movie("no-overview")] : [];
       return json({ Items: missing, TotalRecordCount: missing.length });
     }
+    const types = searchParams.get("includeItemTypes")?.split(",");
+    const filtered = types ? items.filter((item) => types.includes(item.Type)) : items;
     const offset = Number(searchParams.get("startIndex"));
-    return json({ Items: items.slice(offset, offset + limit), TotalRecordCount: items.length });
+    return json({ Items: filtered.slice(offset, offset + limit), TotalRecordCount: filtered.length });
   });
 }
 
@@ -88,7 +90,7 @@ describe("library hygiene tools", () => {
       nextCursor: expect.any(String),
     });
     const calls = fetchMock.mock.calls.length;
-    for (const modified of [{ includeItemTypes: ["Episode"] }, { libraryId: "other" }, { includePath: true }]) {
+    for (const modified of [{ includeItemTypes: ["Episode"] }, { libraryId: "other" }, { includePath: true }, { limit: 2 }]) {
       const result = await call("list_library_items", { ...query, ...modified, cursor: payload.nextCursor });
       expect(result.isError).toBe(true);
       expect(result.payload.error).toMatch(/cursor/i);
@@ -98,6 +100,16 @@ describe("library hygiene tools", () => {
       .toMatchObject({ items: [{ id: "second" }], nextCursor: null });
     expect((await call("list_library_items", { ...query, includePath: true, includeOverview: true })).payload)
       .toMatchObject({ items: [{ path: "/example", overview: "Summary" }] });
+  });
+
+  it("lists 25 items by default and rejects a limit of 201 before fetching", async () => {
+    mockPages(Array.from({ length: 30 }, (_, index) => movie(String(index))));
+    const call = setup();
+    await expect(call("list_library_items", { libraryId, limit: 201 })).rejects.toBeInstanceOf(z.ZodError);
+    expect(fetchMock).not.toHaveBeenCalled();
+    const { payload } = await call("list_library_items", { libraryId });
+    expect(payload.items).toHaveLength(25);
+    expect(payload).toMatchObject({ total: 30, nextCursor: expect.any(String) });
   });
 
   it("counts each missing metadata reason independently", async () => {
@@ -132,8 +144,29 @@ describe("library hygiene tools", () => {
       nextCursor: expect.any(String),
     });
     expect(payload.examples.missingProviderIds).toHaveLength(5);
+    const calls = fetchMock.mock.calls.length;
+    for (const [tool, query] of [
+      ["find_duplicates", { libraryId }],
+      ["find_missing_metadata", { libraryId, includeItemTypes: ["Episode"] }],
+    ] as const) {
+      expect(await call(tool, { ...query, cursor: payload.nextCursor })).toMatchObject({
+        isError: true, payload: { error: expect.stringMatching(/cursor/i) },
+      });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(calls);
     expect((await call("find_missing_metadata", { libraryId, cursor: payload.nextCursor })).payload)
       .toMatchObject({ scanned: 1, complete: true, nextCursor: null });
+  });
+
+  it("defaults metadata scans to movies, series and episodes and accepts a type override", async () => {
+    mockPages(["Movie", "Series", "Episode", "Season", "Folder"].map((Type) => ({ ...movie(Type), Type })));
+    const call = setup();
+    expect((await call("find_missing_metadata", { libraryId })).payload).toMatchObject({
+      scanned: 3, examples: { missingProviderIds: ["Movie", "Series", "Episode"] },
+    });
+    expect((await call("find_missing_metadata", { libraryId, includeItemTypes: ["Season"] })).payload).toMatchObject({
+      scanned: 1, examples: { missingProviderIds: ["Season"] },
+    });
   });
 
   it("groups provider IDs across pages by type and case-insensitive namespace", async () => {
@@ -145,7 +178,8 @@ describe("library hygiene tools", () => {
       { ...movie("multi-version"), MediaSourceCount: 2 },
     ]);
     expect((await setup()("find_duplicates", { libraryId })).payload).toEqual({
-      groupCount: 2,
+      providerGroups: 1,
+      multiVersionItems: 1,
       examples: [
         { type: "Movie", provider: "tmdb", providerId: "42", ids: ["first", "alternate"], itemCount: 2 },
         { type: "Movie", ids: ["multi-version"], mediaSourceCount: 2 },
@@ -155,6 +189,30 @@ describe("library hygiene tools", () => {
       countsAreLowerBounds: false,
       nextCursor: null,
     });
+  });
+
+  it("groups episode IDs and keeps a multi-version example when provider groups fill the budget", async () => {
+    const episodes = Array.from({ length: 6 }, (_, index) => [
+      { ...movie(`episode-${index}`), Type: "Episode", ProviderIds: { Tvdb: String(index) }, MediaSourceCount: index === 0 ? 2 : 1 },
+      { ...movie(`copy-${index}`), Type: "Episode", ProviderIds: { tvdb: String(index) } },
+    ]).flat();
+    mockPages(episodes);
+    const { payload } = await setup()("find_duplicates", { libraryId });
+    expect(payload).toMatchObject({ providerGroups: 6, multiVersionItems: 1 });
+    expect(payload.examples).toHaveLength(5);
+    expect(payload.examples).toEqual(expect.arrayContaining([
+      { type: "Episode", provider: "tvdb", providerId: "0", ids: ["episode-0", "copy-0"], itemCount: 2 },
+      { type: "Episode", ids: ["episode-0"], mediaSourceCount: 2 },
+    ]));
+  });
+
+  it("returns a duplicate scan cursor when the 2000-item cap is reached", async () => {
+    mockPages(Array.from({ length: 2001 }, (_, index) => movie(String(index))));
+    const call = setup();
+    const { payload } = await call("find_duplicates", { libraryId });
+    expect(payload).toMatchObject({ scanned: 2000, complete: false, countsAreLowerBounds: true, nextCursor: expect.any(String) });
+    expect((await call("find_duplicates", { libraryId, cursor: payload.nextCursor })).payload)
+      .toMatchObject({ scanned: 1, complete: true, countsAreLowerBounds: true, nextCursor: null });
   });
 
   it("continues from the last emitted ID when verbose rows hit the result budget", async () => {
@@ -170,14 +228,14 @@ describe("library hygiene tools", () => {
   });
 
   it.each([
-    ["library-items", "total"],
-    ["missing-metadata", "counts"],
-    ["duplicates", "groupCount"],
-  ])("exposes the %s read as JSON in the CLI", async (command, field) => {
-    mockPages([movie("one")]);
+    ["library-items", [], { total: 2 }],
+    ["missing-metadata", ["--type", "Season"], { counts: { missingProviderIds: 1 }, scanned: 1 }],
+    ["duplicates", [], { providerGroups: 0, multiVersionItems: 0 }],
+  ] as const)("exposes the %s read as JSON in the CLI", async (command, flags, expected) => {
+    mockPages([movie("one"), { ...movie("season"), Type: "Season" }]);
     const out = vi.fn();
     const err = vi.fn();
-    expect(await run([command, libraryId], {
+    expect(await run([command, libraryId, ...flags], {
       out, err,
       makeClient: () => new JellyfinClient({
         url: "http://jellyfin.test", apiKey: "test-key", timeout: 1000, verifySsl: true,
@@ -185,19 +243,14 @@ describe("library hygiene tools", () => {
       startServer: vi.fn(),
     })).toBe(0);
     expect(err).not.toHaveBeenCalled();
-    expect(JSON.parse(out.mock.calls[0][0])).toHaveProperty(field);
+    expect(JSON.parse(out.mock.calls[0][0])).toMatchObject(expected);
   });
 
   it("does not queue a refresh for an item that does not exist", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 404 }));
-    expect(await setup()("refresh_item", { itemId: "missing", confirm: true })).toMatchObject({ isError: true });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects a recursion override Jellyfin cannot honor", async () => {
-    fetchMock.mockResolvedValueOnce(json({ ...movie("folder"), Type: "Series", IsFolder: true }));
-    const result = await setup()("refresh_item", { itemId: "folder", confirm: true, recursive: false });
-    expect(result).toMatchObject({ isError: true, payload: { error: expect.stringContaining("recursion") } });
+    fetchMock.mockResolvedValueOnce(json({ Items: [], TotalRecordCount: 0 }));
+    expect(await setup()("refresh_item", { itemId: "missing", confirm: true })).toMatchObject({
+      isError: true, payload: { error: expect.stringMatching(/not found/i) },
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -210,7 +263,15 @@ describe("library hygiene tools", () => {
   });
 
   it("validates item existence and sends both replacement flags as false by default", async () => {
-    fetchMock.mockResolvedValueOnce(json(movie("item-example")));
+    fetchMock.mockImplementationOnce(async (url: string, request: RequestInit) => {
+      const parsed = new URL(url);
+      expect(request.method ?? "GET").toBe("GET");
+      expect(parsed.pathname).toBe("/Items");
+      expect(Object.fromEntries(parsed.searchParams)).toEqual({
+        ids: "item-example", enableUserData: "false", enableImages: "false",
+      });
+      return json({ Items: [movie("item-example")], TotalRecordCount: 1 });
+    });
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
     const result = await setup()("refresh_item", { itemId: "item-example", confirm: true });
     const parameters = {
@@ -221,7 +282,6 @@ describe("library hygiene tools", () => {
     };
     expect(result.payload).toEqual({ result: "queued", itemId: "item-example", parameters });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0][0]).toBe("http://jellyfin.test/Items/item-example");
     const [url, request] = fetchMock.mock.calls[1];
     expect(request.method).toBe("POST");
     const parsed = new URL(url);

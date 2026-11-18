@@ -12,6 +12,7 @@ import {
 import { mapHttpError } from "./effect/request.js";
 import type {
   SystemInfo,
+  SystemStorage,
   PluginInfo,
   Library,
   User,
@@ -243,6 +244,10 @@ export class JellyfinClient {
     return this.request<SystemInfo>("/System/Info");
   }
 
+  async getSystemStorage(): Promise<SystemStorage> {
+    return this.request<SystemStorage>("/System/Info/Storage");
+  }
+
   async listPlugins(): Promise<PluginInfo[]> {
     return this.request<PluginInfo[]>("/Plugins");
   }
@@ -301,17 +306,12 @@ export class JellyfinClient {
 
   async refreshItem(
     itemId: string,
-    options: { replaceAllMetadata: boolean; replaceAllImages: boolean; recursive?: boolean },
+    options: { replaceAllMetadata: boolean; replaceAllImages: boolean },
   ): Promise<ItemRefreshParameters> {
     const path = `/Items/${encodeURIComponent(itemId)}`;
-    const item = await this.request<Item>(path);
-    // Jellyfin chooses whether to refresh descendants based on item type.
-    const refreshesDescendants = item.IsFolder === true || item.Type === "MusicArtist";
-    if (options.recursive !== undefined && options.recursive !== refreshesDescendants) {
-      throw new Error(
-        "Jellyfin controls recursion by item type. Omit recursive to use Jellyfin's built-in behavior.",
-      );
-    }
+    const lookup = new URLSearchParams({ ids: itemId, enableUserData: "false", enableImages: "false" });
+    const { Items: items } = await this.request<ItemsResponse>(`/Items?${lookup}`);
+    if (items.length === 0) throw new Error("Item not found.");
     const parameters: ItemRefreshParameters = {
       metadataRefreshMode: "FullRefresh",
       imageRefreshMode: "FullRefresh",
@@ -329,10 +329,29 @@ export class JellyfinClient {
   }
 
   async scanLibraries(libraryId?: string): Promise<void> {
-    const path = libraryId
-      ? `/Library/Refresh?libraryId=${encodeURIComponent(libraryId)}`
-      : "/Library/Refresh";
-    await this.request(path, { method: "POST" }, false);
+    if (libraryId === undefined) {
+      await this.request("/Library/Refresh", { method: "POST" }, false);
+      return;
+    }
+
+    const libraries = await this.listLibraries();
+    const normalizedId = libraryId.toLowerCase();
+    const library = libraries.find((entry) => entry.ItemId?.toLowerCase() === normalizedId);
+    if (!libraryId || !library) {
+      throw new Error("Unknown library ID. Use an ID from jellyfin_list_libraries.");
+    }
+
+    const params = new URLSearchParams({
+      metadataRefreshMode: "Default",
+      imageRefreshMode: "Default",
+      replaceAllMetadata: "false",
+      replaceAllImages: "false",
+    });
+    await this.request(
+      `/Items/${encodeURIComponent(library.ItemId)}/Refresh?${params}`,
+      { method: "POST" },
+      false,
+    );
   }
 
   // ── Users ─────────────────────────────────────────────────────────────────

@@ -6,7 +6,8 @@ import { z } from "zod";
 import { JellyfinClient } from "./client.js";
 import { getConfig } from "./config.js";
 import { fromPromise } from "./effect/tool-adapter.js";
-import { findDuplicates, findMissingMetadata, libraryInput, libraryItemsInput, listLibraryItems } from "./tools/hygiene.js";
+import { getHealthBrief, healthBriefSchema, type HealthBriefOptions } from "./tools/health-brief.js";
+import { findDuplicates, findMissingMetadata, libraryInput, libraryItemsInput, listLibraryItems, missingMetadataInput } from "./tools/hygiene.js";
 import type {
   ActivityLogResponse,
   Item,
@@ -36,9 +37,11 @@ export type Parsed =
   | { kind: "version" }
   | { kind: "mcp" }
   | { kind: "status"; json: boolean }
+  | { kind: "health-brief"; options: HealthBriefOptions }
   | { kind: "libraries"; json: boolean }
   | { kind: "library-items"; query: z.output<z.ZodObject<typeof libraryItemsInput>> }
-  | { kind: "missing-metadata" | "duplicates"; query: z.output<z.ZodObject<typeof libraryInput>> }
+  | { kind: "missing-metadata"; query: z.output<z.ZodObject<typeof missingMetadataInput>> }
+  | { kind: "duplicates"; query: z.output<z.ZodObject<typeof libraryInput>> }
   | { kind: "users"; json: boolean }
   | { kind: "sessions"; json: boolean; activeOnly: boolean }
   | { kind: "search"; json: boolean; query: string; types?: string; limit: number }
@@ -61,6 +64,7 @@ Usage:
 
 Server:
   status                     Server info (name, version, OS, pending restart)  [exit 1 if unreachable]
+  health-brief               Daily server health counts and exceptions (JSON)
   libraries                  List libraries (virtual folders) with paths
   tasks                      List scheduled tasks with state and last result
   activity                   Recent activity-log entries
@@ -98,6 +102,9 @@ Global options:
   --help, -h                 Show help
 
 Command options:
+  health-brief --window-hours <n>     Activity window, 1-168        (default 24)
+               --min-free-percent <n> Free-space warning percent  (default 15)
+               --min-free-gb <n>      Free-space warning in GB     (default 50)
   sessions   --active-only            Only sessions with a now-playing item
   search     --type <t,...>           Comma-separated item types (Movie,Series,Episode,...)
              --limit <n>              Max results, 1-200            (default 20)
@@ -105,6 +112,7 @@ Command options:
                 --limit <n>           Page size, 1-200              (default 25)
                 --include-path        Include filesystem paths
                 --include-overview    Include overview text
+  missing-metadata --type <t,...>     Item types (default Movie,Series,Episode)
   library-items, missing-metadata, duplicates
                 --cursor <cursor>     Continue with the same query
   recent     --limit <n>              Max results, 1-100            (default 20)
@@ -187,6 +195,22 @@ export function parseArgs(argv: string[]): Parsed {
     case "status":
       ensureNoExtra(args);
       return { kind: "status", json };
+    case "health-brief": {
+      const flags = {
+        windowHours: "--window-hours", minFreePercent: "--min-free-percent", minFreeGb: "--min-free-gb",
+      } as const;
+      const options = Object.fromEntries(Object.entries(flags).map(([key, flag]) => {
+        const value = takeOption(args, flag);
+        return [key, value === undefined ? undefined : value.trim() ? Number(value) : NaN];
+      }));
+      ensureNoExtra(args);
+      const parsed = healthBriefSchema.safeParse(options);
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        throw new UsageError(`${flags[issue.path[0] as keyof typeof flags]}: ${issue.message}`);
+      }
+      return { kind: "health-brief", options: parsed.data };
+    }
     case "libraries":
       ensureNoExtra(args);
       return { kind: "libraries", json };
@@ -205,6 +229,13 @@ export function parseArgs(argv: string[]): Parsed {
         const query = z.object(libraryItemsInput).safeParse({
           ...base, includeItemTypes, limit, includePath, includeOverview,
         });
+        if (!query.success) throw new UsageError("Invalid library ID, cursor or item types.");
+        return { kind: cmd, query: query.data };
+      }
+      if (cmd === "missing-metadata") {
+        const includeItemTypes = takeOption(args, "--type")?.split(",").map((type) => type.trim());
+        ensureNoExtra(args);
+        const query = z.object(missingMetadataInput).safeParse({ ...base, includeItemTypes });
         if (!query.success) throw new UsageError("Invalid library ID, cursor or item types.");
         return { kind: cmd, query: query.data };
       }
@@ -311,8 +342,8 @@ function renderStatus(s: SystemInfo): string {
     `os: ${s.OperatingSystemDisplayName ?? "(unknown)"}`,
     `architecture: ${s.SystemArchitecture ?? "(unknown)"}`,
     `localAddress: ${s.LocalAddress ?? "(unknown)"}`,
-    `hasPendingRestart: ${s.HasPendingRestart ?? false}`,
-    `hasUpdateAvailable: ${s.HasUpdateAvailable ?? false}`,
+    `hasPendingRestart: ${s.HasPendingRestart ?? "unknown"}`,
+    `hasUpdateAvailable: ${s.HasUpdateAvailable ?? "unknown"}`,
   ].join("\n");
 }
 
@@ -509,6 +540,11 @@ function dispatch(
         const ok = typeof r.Version === "string" && r.Version.length > 0;
         deps.out(parsed.json ? JSON.stringify(r, null, 2) : renderStatus(r));
         return ok ? 0 : 1;
+      }
+      case "health-brief": {
+        const brief = yield* fromPromise(() => getHealthBrief(client, parsed.options));
+        deps.out(JSON.stringify(brief));
+        return 0;
       }
       case "libraries": {
         const r = yield* fromPromise(() => client.listLibraries());

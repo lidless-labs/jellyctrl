@@ -5,6 +5,7 @@ import { JellyfinClient } from "./client.js";
 import { registerAccessTools } from "./tools/access.js";
 import { registerCollectionTools } from "./tools/collections.js";
 import { registerDiscoveryTools } from "./tools/discovery.js";
+import { registerHealthBriefTool } from "./tools/health-brief.js";
 import { registerHygieneTools } from "./tools/hygiene.js";
 import { registerItemTools } from "./tools/items.js";
 import { registerLibraryTools } from "./tools/libraries.js";
@@ -26,6 +27,7 @@ export interface McpServerResource {
 
 export function registerAllTools(server: McpServer, client: JellyfinClient): void {
   registerSystemTools(server, client);
+  registerHealthBriefTool(server, client);
   registerAccessTools(server, client);
   registerLibraryTools(server, client);
   registerHygieneTools(server, client);

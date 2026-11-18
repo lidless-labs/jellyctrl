@@ -265,18 +265,39 @@ describe("JellyfinClient", () => {
     await expect(client.stopSession("session-1")).resolves.toBeUndefined();
   });
 
-  it("passes scan libraryId as query param", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
-    await client.scanLibraries("lib-abc");
-    const [url] = fetchMock.mock.calls[0];
-    expect(url).toBe("http://jellyfin.test/Library/Refresh?libraryId=lib-abc");
+  it.each([false, true])("queues an item refresh for a known library (uppercase input: %s)", async (uppercase) => {
+    const libraryId = "1a2b3c4d-5678-4321-8765-abcdef012345";
+    fetchMock
+      .mockResolvedValueOnce(Response.json([{ ItemId: libraryId }, { ItemId: "lib-other" }]))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await client.scanLibraries(uppercase ? libraryId.toUpperCase() : libraryId);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://jellyfin.test/Library/VirtualFolders");
+    const [url, options] = fetchMock.mock.calls[1];
+    const refresh = new URL(url);
+    expect(refresh.pathname).toBe(`/Items/${libraryId}/Refresh`);
+    expect(options.method).toBe("POST");
+    expect(Object.fromEntries(refresh.searchParams)).toEqual({
+      metadataRefreshMode: "Default",
+      imageRefreshMode: "Default",
+      replaceAllMetadata: "false",
+      replaceAllImages: "false",
+    });
   });
 
-  it("omits libraryId when scanning all", async () => {
+  it.each(["Movies", "missing", ""])("refuses to refresh a non-library ID %j", async (libraryId) => {
+    fetchMock.mockResolvedValueOnce(Response.json([{ Name: "Movies", ItemId: "lib-abc" }]));
+    await expect(client.scanLibraries(libraryId)).rejects.toThrow("Unknown library ID");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe("http://jellyfin.test/Library/VirtualFolders");
+  });
+
+  it("posts to the full scan endpoint without query parameters", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
     await client.scanLibraries();
-    const [url] = fetchMock.mock.calls[0];
+    const [url, options] = fetchMock.mock.calls[0];
     expect(url).toBe("http://jellyfin.test/Library/Refresh");
+    expect(options.method).toBe("POST");
   });
 
   it("converts seek seconds to ticks (10M ticks/sec)", async () => {

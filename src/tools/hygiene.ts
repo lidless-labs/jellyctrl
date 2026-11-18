@@ -11,7 +11,8 @@ const SCAN_PAGE_SIZE = 100;
 const MAX_SCAN_PAGES = 20;
 const MAX_EXAMPLES = 5;
 const MAX_EXAMPLE_GROUP_IDS = 10;
-const DUPLICATE_TYPES = ["Movie", "Series", "Episode"];
+const DEFAULT_HYGIENE_TYPES = ["Movie", "Series", "Episode"];
+const CURSOR_DESCRIPTION = "The cursor uses an unkeyed hash to detect query changes. It provides no authentication or authorization.";
 // Leave room for the response envelope, cursor and JSON escaping in the kit cap.
 const LIST_ROW_BYTE_BUDGET = 75_000;
 
@@ -85,9 +86,17 @@ function recordExample(examples: string[], id: string) {
   if (examples.length < MAX_EXAMPLES) examples.push(id);
 }
 
+const itemTypesSchema = z.array(z.string().regex(/^[a-zA-Z]+$/).max(40)).max(40);
+
+export const missingMetadataInput = {
+  ...libraryInput,
+  includeItemTypes: itemTypesSchema.min(1).default(DEFAULT_HYGIENE_TYPES)
+    .describe("Item types to scan. Defaults to Movie, Series and Episode."),
+};
+
 export const libraryItemsInput = {
   ...libraryInput,
-  includeItemTypes: z.array(z.string().regex(/^[a-zA-Z]+$/).max(40)).max(40).optional()
+  includeItemTypes: itemTypesSchema.optional()
     .describe("Jellyfin item types, such as Movie, Series or Episode."),
   limit: z.number().int().min(1).max(200).default(25),
   includePath: z.boolean().default(false),
@@ -95,6 +104,7 @@ export const libraryItemsInput = {
 };
 
 type LibraryQuery = z.output<z.ZodObject<typeof libraryInput>>;
+type MissingMetadataQuery = z.output<z.ZodObject<typeof missingMetadataInput>>;
 type ListOptions = z.output<z.ZodObject<typeof libraryItemsInput>>;
 
 export async function listLibraryItems(client: JellyfinClient, { libraryId, cursor, includeItemTypes, limit, includePath, includeOverview }: ListOptions) {
@@ -131,12 +141,13 @@ export async function listLibraryItems(client: JellyfinClient, { libraryId, curs
   return { items: rows, total, nextCursor: nextIndex < total ? page.encode(nextIndex) : null };
 }
 
-export async function findMissingMetadata(client: JellyfinClient, { libraryId, cursor }: LibraryQuery) {
-  const page = pagination(["metadata", libraryId], cursor);
+export async function findMissingMetadata(client: JellyfinClient, { libraryId, cursor, includeItemTypes }: MissingMetadataQuery) {
+  const types = [...new Set(includeItemTypes)].sort();
+  const page = pagination(["metadata", libraryId, types], cursor);
   const counts = { missingOverview: 0, missingPrimaryImage: 0, missingProviderIds: 0 };
   const examples = { missingOverview: [] as string[], missingPrimaryImage: [] as string[], missingProviderIds: [] as string[] };
   const scan = await scanPages(client, libraryId, page.startIndex, {
-    fields: ["ProviderIds"], includePrimaryImage: true,
+    includeItemTypes: types, fields: ["ProviderIds"], includePrimaryImage: true,
   }, async (items) => {
     // Scope Jellyfin's overview predicate to this page so the other reasons
     // are still checked on items that already have an overview.
@@ -169,10 +180,10 @@ export async function findDuplicates(client: JellyfinClient, { libraryId, cursor
   const groups = new Map<string, { type: string; provider: string; providerId: string; ids: Set<string> }>();
   const multiVersion = new Map<string, { type: string; ids: string[]; mediaSourceCount: number }>();
   const scan = await scanPages(client, libraryId, page.startIndex, {
-    includeItemTypes: DUPLICATE_TYPES, fields: ["ProviderIds", "MediaSourceCount"],
+    includeItemTypes: DEFAULT_HYGIENE_TYPES, fields: ["ProviderIds", "MediaSourceCount"],
   }, (items) => {
     for (const item of items) {
-      if (!DUPLICATE_TYPES.includes(item.Type)) continue;
+      if (!DEFAULT_HYGIENE_TYPES.includes(item.Type)) continue;
       if (item.MediaSourceCount != null && item.MediaSourceCount > 1) {
         multiVersion.set(item.Id, { type: item.Type, ids: [item.Id], mediaSourceCount: item.MediaSourceCount });
       }
@@ -188,12 +199,14 @@ export async function findDuplicates(client: JellyfinClient, { libraryId, cursor
     }
   });
   const shared = [...groups.values()].filter((group) => group.ids.size > 1);
-  const examples = shared.slice(0, MAX_EXAMPLES).map(({ ids, ...key }) => ({
+  const providerExampleLimit = multiVersion.size > 0 ? MAX_EXAMPLES - 1 : MAX_EXAMPLES;
+  const providerExamples = shared.slice(0, providerExampleLimit).map(({ ids, ...key }) => ({
     ...key, ids: [...ids].slice(0, MAX_EXAMPLE_GROUP_IDS), itemCount: ids.size,
   }));
   return {
-    groupCount: shared.length + multiVersion.size,
-    examples: [...examples, ...multiVersion.values()].slice(0, MAX_EXAMPLES),
+    providerGroups: shared.length,
+    multiVersionItems: multiVersion.size,
+    examples: [...providerExamples, ...multiVersion.values()].slice(0, MAX_EXAMPLES),
     ...scanSummary(scan, page),
   };
 }
@@ -201,7 +214,7 @@ export async function findDuplicates(client: JellyfinClient, { libraryId, cursor
 export function registerHygieneTools(server: McpServer, client: JellyfinClient): void {
   server.tool(
     "jellyfin_list_library_items",
-    "List a compact page of items from one library, with a total and an opaque continuation cursor.",
+    `List a compact page of items from one library, with a total and an opaque continuation cursor. ${CURSOR_DESCRIPTION}`,
     libraryItemsInput,
     READ_ONLY,
     toToolHandler((args) => fromPromise(async () => ok(await listLibraryItems(client, args)))),
@@ -209,15 +222,15 @@ export function registerHygieneTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_find_missing_metadata",
-    "Count items missing an overview, Primary image or provider IDs. Each call scans one window and returns up to five IDs per reason.",
-    libraryInput,
+    `Count movies, series and episodes missing an overview, Primary image or provider IDs by default. Each call scans one window and returns up to five IDs per reason. ${CURSOR_DESCRIPTION}`,
+    missingMetadataInput,
     READ_ONLY,
     toToolHandler((args) => fromPromise(async () => ok(await findMissingMetadata(client, args)))),
   );
 
   server.tool(
     "jellyfin_find_duplicates",
-    "Find review candidates among movies, series and episodes with shared provider IDs or multiple media versions. Groups span all pages in the current scan window.",
+    `Find review candidates among movies, series and episodes with shared provider IDs or multiple media versions. Groups span all pages in the current scan window. ${CURSOR_DESCRIPTION}`,
     libraryInput,
     READ_ONLY,
     toToolHandler((args) => fromPromise(async () => ok(await findDuplicates(client, args)))),
@@ -225,12 +238,11 @@ export function registerHygieneTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_refresh_item",
-    "Queue a metadata and image refresh for an existing item. Replacement is opt-in. Jellyfin also refreshes descendants of folder items.",
+    "Queue a metadata and image refresh for an existing item. Replacement is opt-in. Jellyfin decides whether to refresh descendants based on item type.",
     {
       itemId: z.string().trim().min(1),
       replaceAllMetadata: z.boolean().default(false),
       replaceAllImages: z.boolean().default(false),
-      recursive: z.boolean().optional().describe("Optional assertion of Jellyfin's built-in recursion for the item type."),
       confirm: z.boolean().optional(),
     },
     DESTRUCTIVE,

@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import type { JellyfinClient } from "../client.js";
 import { fromPromise, toolResult, toToolHandler } from "../effect/tool-adapter.js";
-import { ok, NON_DESTRUCTIVE, READ_ONLY } from "./_util.js";
+import { ok, refuseUnconfirmed, DESTRUCTIVE, READ_ONLY } from "./_util.js";
 
 export function registerLibraryTools(server: McpServer, client: JellyfinClient): void {
   server.tool(
@@ -28,21 +28,25 @@ export function registerLibraryTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_scan_library",
-    "Trigger a library scan. Pass a specific library ID to scan just that one, or omit to scan all libraries. Returns immediately - the scan runs async in Jellyfin.",
+    "Queue a Jellyfin library scan. Omit libraryId and pass confirm: true to scan all libraries. A scoped refresh with a libraryId needs no confirmation and leaves metadata and image replacement disabled.",
     {
       libraryId: z
         .string()
         .optional()
-        .describe("Library ID from jellyfin_list_libraries. Omit to scan all libraries."),
+        .describe("Library ID from jellyfin_list_libraries. Omit to request a full scan."),
+      confirm: z.boolean().optional().describe("Must be true for a full scan."),
     },
-    NON_DESTRUCTIVE,
-    toToolHandler(({ libraryId }) =>
+    DESTRUCTIVE,
+    toToolHandler(({ libraryId, confirm }) =>
       toolResult(Effect.gen(function* () {
+        if (libraryId === undefined && confirm !== true) {
+          return refuseUnconfirmed("scan all Jellyfin libraries");
+        }
         yield* fromPromise(() => client.scanLibraries(libraryId));
         return ok({
-          result: libraryId
-            ? `scan triggered for library ${libraryId}`
-            : "scan triggered for all libraries",
+          result: libraryId === undefined
+            ? "scan queued for all libraries"
+            : `scan queued for library ${libraryId}`,
         });
       })),
     ),
