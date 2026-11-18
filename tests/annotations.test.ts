@@ -2,17 +2,7 @@ import { describe, it, expect } from "vitest";
 import { assertToolAnnotations, type ToolAnnotations } from "@lidless-labs/effect-operator-kit";
 import type { JellyfinClient } from "../src/client.js";
 import { DESTRUCTIVE, NON_DESTRUCTIVE, READ_ONLY } from "../src/tools/_util.js";
-import { registerSystemTools } from "../src/tools/system.js";
-import { registerLibraryTools } from "../src/tools/libraries.js";
-import { registerUserTools } from "../src/tools/users.js";
-import { registerSessionTools } from "../src/tools/sessions.js";
-import { registerItemTools } from "../src/tools/items.js";
-import { registerTaskTools } from "../src/tools/tasks.js";
-import { registerUserDataTools } from "../src/tools/userdata.js";
-import { registerPlaylistTools } from "../src/tools/playlists.js";
-import { registerCollectionTools } from "../src/tools/collections.js";
-import { registerDiscoveryTools } from "../src/tools/discovery.js";
-import { registerQuickConnectTools } from "../src/tools/quickconnect.js";
+import { registerAllTools } from "../src/server.js";
 
 // Fake McpServer that records the annotations each tool registers with. Tool
 // registration is positional: (name, description, schema, annotations, handler).
@@ -30,21 +20,13 @@ function captureAllTools(): Map<string, Captured> {
     },
   };
   const client = {} as JellyfinClient;
-  registerSystemTools(server as never, client);
-  registerLibraryTools(server as never, client);
-  registerUserTools(server as never, client);
-  registerSessionTools(server as never, client);
-  registerItemTools(server as never, client);
-  registerTaskTools(server as never, client);
-  registerUserDataTools(server as never, client);
-  registerPlaylistTools(server as never, client);
-  registerCollectionTools(server as never, client);
-  registerDiscoveryTools(server as never, client);
-  registerQuickConnectTools(server as never, client);
+  registerAllTools(server as never, client);
   return tools;
 }
 
 const READ_ONLY_TOOLS = [
+  "jellyfin_list_api_keys",
+  "jellyfin_list_devices",
   "jellyfin_get_status",
   "jellyfin_list_plugins",
   "jellyfin_list_libraries",
@@ -91,8 +73,8 @@ const DESTRUCTIVE_TOOLS = [
 describe("MCP tool annotations", () => {
   const tools = captureAllTools();
 
-  it("registers all 59 tools", () => {
-    expect(tools.size).toBe(59);
+  it("registers all 61 tools", () => {
+    expect(tools.size).toBe(61);
   });
 
   it("every tool carries annotations with an explicit readOnlyHint", () => {

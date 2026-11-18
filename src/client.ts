@@ -19,6 +19,8 @@ import type {
   ItemsResponse,
   ActivityLogResponse,
   ActivityLogOptions,
+  ApiKeysResponse,
+  DevicesResponse,
   ScheduledTask,
   Playlist,
   PlayCommand,
@@ -195,6 +197,18 @@ export class JellyfinClient {
 
   async shutdown(): Promise<void> {
     await this.request("/System/Shutdown", { method: "POST" }, false);
+  }
+
+  // Access inventory
+  async listApiKeys(): Promise<ApiKeysResponse> {
+    return this.request<ApiKeysResponse>("/Auth/Keys");
+  }
+
+  async listDevices(userId?: string): Promise<DevicesResponse> {
+    const path = userId === undefined
+      ? "/Devices"
+      : `/Devices?userId=${encodeURIComponent(userId)}`;
+    return this.request<DevicesResponse>(path);
   }
 
   // ── Libraries ─────────────────────────────────────────────────────────────
