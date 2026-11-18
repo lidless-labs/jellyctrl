@@ -10,7 +10,7 @@ export function registerAccessTools(server: McpServer, client: JellyfinClient): 
     "jellyfin_list_api_keys",
     "List Jellyfin API-key metadata without access tokens. Returns the total count and API-key inventory.",
     {},
-    { ...READ_ONLY, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    READ_ONLY,
     toToolHandler(() =>
       toolResult(Effect.gen(function* () {
         const result = yield* fromPromise(() => client.listApiKeys());
@@ -34,17 +34,18 @@ export function registerAccessTools(server: McpServer, client: JellyfinClient): 
 
   server.tool(
     "jellyfin_list_devices",
-    "List Jellyfin device metadata without access tokens, optionally filtered by user ID. Returns the total count and device inventory.",
+    "List Jellyfin device metadata without access tokens, optionally filtered by user ID. Returns the total count and up to the requested number of devices.",
     {
       userId: z.string().optional().describe("Only list devices accessible to this user ID"),
+      limit: z.number().int().min(1).max(200).default(50).describe("Maximum device rows to return."),
     },
-    { ...READ_ONLY, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    toToolHandler(({ userId }) =>
+    READ_ONLY,
+    toToolHandler(({ userId, limit }) =>
       toolResult(Effect.gen(function* () {
         const result = yield* fromPromise(() => client.listDevices(userId));
         return ok({
           totalCount: result.TotalRecordCount,
-          devices: result.Items.map((device) => ({
+          devices: result.Items.slice(0, limit).map((device) => ({
             id: device.Id ?? null,
             name: device.Name ?? null,
             customName: device.CustomName ?? null,

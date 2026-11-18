@@ -127,7 +127,7 @@ describe("access inventory tools", () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ Items: [], TotalRecordCount: 0 })));
     const tool = tools.get(entry.tool);
     expect(tool).toBeDefined();
-    const result = await tool!.handler({});
+    const result = await tool!.handler(z.object(tool!.schema).parse({}));
     expect(result.isError).not.toBe(true);
     expect(JSON.parse(result.content[0].text)).toEqual({ totalCount: 0, [entry.list]: [] });
   });
@@ -158,7 +158,7 @@ describe("access inventory tools", () => {
     fetchMock.mockRejectedValueOnce(new TypeError("example upstream failure"));
     const tool = tools.get(entry.tool);
     expect(tool).toBeDefined();
-    const result = await tool!.handler({});
+    const result = await tool!.handler(z.object(tool!.schema).parse({}));
     expect(result.isError).toBe(true);
     expect(JSON.parse(result.content[0].text)).toEqual({ error: "Unable to connect to Jellyfin" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -166,18 +166,33 @@ describe("access inventory tools", () => {
 
   it.each(cases)("$tool declares all four read-only annotation hints", (entry) => {
     expect(tools.get(entry.tool)?.annotations).toEqual({
-      readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true,
+      readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false,
     });
   });
 
-  it("accepts no API-key inputs and only an optional device userId", () => {
+  it("accepts no API-key inputs and validates the device userId and limit", () => {
     expect(tools.get("jellyfin_list_api_keys")?.schema).toEqual({});
     const device = tools.get("jellyfin_list_devices");
     expect(device).toBeDefined();
-    expect(Object.keys(device!.schema)).toEqual(["userId"]);
+    expect(Object.keys(device!.schema)).toEqual(["userId", "limit"]);
     const schema = z.object(device!.schema);
-    expect(schema.parse({})).toEqual({});
+    expect(schema.parse({})).toEqual({ limit: 50 });
     expect(() => schema.parse({ userId: 42 })).toThrow();
+    for (const limit of [0, 1.5, 201]) {
+      expect(() => schema.parse({ limit })).toThrow();
+    }
+  });
+
+  it.each([[undefined, 50], [2, 2]])("caps device output at limit %s while preserving the total", async (limit, expected) => {
+    const items = Array.from({ length: 60 }, (_, index) => ({ Id: String(index), AccessToken: "ACCESS_TOKEN_MARKER" }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ Items: items, TotalRecordCount: 60 })));
+    const tool = tools.get("jellyfin_list_devices")!;
+    const result = await tool.handler(z.object(tool.schema).parse({ limit }));
+    expect(result.isError).not.toBe(true);
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload.totalCount).toBe(60);
+    expect(payload.devices.map((device: { id: string }) => device.id)).toEqual(items.slice(0, expected).map((item) => item.Id));
+    expect(result.content[0].text).not.toContain("ACCESS_TOKEN_MARKER");
   });
 
   it("passes the device user filter to a single encoded upstream request", async () => {
