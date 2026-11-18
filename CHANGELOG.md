@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `jellyfin_list_plugins` returns status counts and non-Active plugin summaries,
+  with full plugin details available on request. The MCP surface now has 59 tools.
+
 - `jellyfin_get_user` reads one user's password status, login/activity timestamps,
   and selected policy fields. Missing values return `null`. HTTP `observe` mode
   permits this read-only tool. The MCP surface now has 58 tools.

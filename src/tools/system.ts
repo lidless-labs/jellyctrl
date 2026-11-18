@@ -7,6 +7,39 @@ import { ok, refuseUnconfirmed, DESTRUCTIVE, READ_ONLY } from "./_util.js";
 
 export function registerSystemTools(server: McpServer, client: JellyfinClient): void {
   server.tool(
+    "jellyfin_list_plugins",
+    "Count installed Jellyfin plugins by status and summarize non-Active plugins. Opt in to full inventory details.",
+    { includeDetails: z.boolean().default(false).describe("Include all plugins with versions, descriptions, and uninstallability.") },
+    READ_ONLY,
+    toToolHandler(({ includeDetails }) =>
+      toolResult(Effect.gen(function* () {
+        const plugins = yield* fromPromise(() => client.listPlugins());
+        const byStatus = new Map<string, number>();
+        for (const plugin of plugins) {
+          byStatus.set(plugin.Status, (byStatus.get(plugin.Status) ?? 0) + 1);
+        }
+        return ok({
+          count: plugins.length,
+          byStatus: Object.fromEntries(byStatus),
+          plugins: plugins
+            .filter((plugin) => includeDetails || plugin.Status !== "Active")
+            .sort((a, b) => a.Name.localeCompare(b.Name))
+            .map((plugin) => ({
+              id: plugin.Id,
+              name: plugin.Name,
+              status: plugin.Status,
+              ...(includeDetails ? {
+                version: plugin.Version,
+                description: plugin.Description,
+                canUninstall: plugin.CanUninstall,
+              } : {}),
+            })),
+        });
+      })),
+    ),
+  );
+
+  server.tool(
     "jellyfin_get_status",
     "Get Jellyfin server info: name, version, OS, architecture, local address, pending restart, update availability.",
     {},
