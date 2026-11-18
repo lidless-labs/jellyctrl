@@ -88,6 +88,9 @@ describe("HTTP transport configuration", () => {
     vi.stubEnv("JELLYFIN_URL", env.JELLYFIN_URL);
     vi.stubEnv("JELLYFIN_API_KEY", env.JELLYFIN_API_KEY);
     vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN", env.JELLYFIN_MCP_HTTP_TOKEN);
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_READ", undefined);
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_ROUTINE", undefined);
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_HIGH_IMPACT", undefined);
   });
 
   afterEach(() => {
@@ -124,14 +127,30 @@ describe("HTTP transport configuration", () => {
     expect(() => getHttpConfig()).toThrow(/at least 32 characters/);
   });
 
-  it("requires an independent HTTP token", () => {
-    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN", "");
-    expect(() => getHttpConfig()).toThrow("JELLYFIN_MCP_HTTP_TOKEN");
+  it.each(["", " \t "])("ignores a blank legacy token %j alongside a valid read token", (blank) => {
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN", blank);
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_READ", readToken);
+    const config = getHttpConfig();
+    expect(config.token).toBeUndefined();
+    expect(config.scopedTokens.observe).toBe(readToken);
   });
 
-  it("rejects whitespace-only HTTP tokens", () => {
-    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN", "   ");
-    expect(() => getHttpConfig()).toThrow("JELLYFIN_MCP_HTTP_TOKEN");
+  it("ignores blank routine and high-impact tokens alongside a valid read token", () => {
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_READ", readToken);
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_ROUTINE", "");
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_HIGH_IMPACT", " \t ");
+    const config = getHttpConfig();
+    expect(config.scopedTokens.observe).toBe(readToken);
+    expect(config.scopedTokens.managed).toBeUndefined();
+    expect(config.scopedTokens.full).toBeUndefined();
+  });
+
+  it.each([undefined, "", " \t "])("requires a token when all token variables are %j", (value) => {
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN", value);
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_READ", value);
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_ROUTINE", value);
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_HIGH_IMPACT", value);
+    expect(() => getHttpConfig()).toThrow("At least one JELLYFIN_MCP_HTTP_TOKEN or scoped HTTP token is required");
   });
 });
 
@@ -269,6 +288,37 @@ describe("HTTP transport", () => {
         }
       }
     } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("allows a routine call and rejects shutdown over HTTP with the routine bearer", async () => {
+    useScopedTokens();
+    const pause = vi.spyOn(JellyfinClient.prototype, "pauseSession").mockResolvedValue();
+    const shutdown = vi.spyOn(JellyfinClient.prototype, "shutdown").mockResolvedValue();
+    const server = createServer(createHttpListener(createHttpRequestHandler(getHttpConfig())));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const client = new Client({ name: "http-routine-policy-test", version: "1" });
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("No HTTP port");
+      const uri = new URL(`http://127.0.0.1:${address.port}/mcp`);
+      await client.connect(new StreamableHTTPClientTransport(uri, {
+        requestInit: { headers: { authorization: `Bearer ${routineToken}` } },
+      }));
+      const result = await client.callTool({
+        name: "jellyfin_pause_session", arguments: { sessionId: "s1", confirm: true },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(pause).toHaveBeenCalledExactlyOnceWith("s1");
+
+      await expect(client.callTool({
+        name: "jellyfin_shutdown_server", arguments: { confirm: true },
+      })).rejects.toMatchObject({ code: 403 });
+      expect(shutdown).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }

@@ -66,7 +66,8 @@ export function getConfig(): JellyfinConfig {
 function readHttpToken(name: string): string | undefined {
   // Header values arrive trimmed, so compare against the trimmed secret.
   const token = process.env[name]?.trim();
-  if (token !== undefined && token.length < MIN_HTTP_TOKEN_LENGTH) {
+  if (!token) return undefined;
+  if (token.length < MIN_HTTP_TOKEN_LENGTH) {
     throw new Error(`${name} must be at least ${MIN_HTTP_TOKEN_LENGTH} characters (e.g. openssl rand -hex 32)`);
   }
   return token;
