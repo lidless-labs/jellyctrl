@@ -17,6 +17,7 @@ import type {
   Item,
   ItemsResponse,
   ActivityLogResponse,
+  ActivityLogOptions,
   ScheduledTask,
   Playlist,
   PlayCommand,
@@ -416,9 +417,23 @@ export class JellyfinClient {
   }
 
   // ── Activity & Tasks ──────────────────────────────────────────────────────
-  async getActivityLog(limit = 20, minDate?: string): Promise<ActivityLogResponse> {
-    const params = new URLSearchParams({ Limit: String(limit) });
-    if (minDate) params.set("minDate", minDate);
+  async getActivityLog(options: ActivityLogOptions = {}): Promise<ActivityLogResponse> {
+    const limit = options.limit ?? 20;
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new RangeError("limit must be a positive integer");
+    }
+    if (options.startIndex !== undefined &&
+        (!Number.isInteger(options.startIndex) || options.startIndex < 0)) {
+      throw new RangeError("startIndex must be a nonnegative integer");
+    }
+    const params = new URLSearchParams({ limit: String(Math.min(limit, 200)) });
+    for (const key of [
+      "startIndex", "minDate", "maxDate", "hasUserId", "username",
+      "severity", "type", "name", "sortBy", "sortOrder",
+    ] as const) {
+      const value = options[key];
+      if (value !== undefined) params.set(key, String(value));
+    }
     return this.request<ActivityLogResponse>(`/System/ActivityLog/Entries?${params.toString()}`);
   }
 

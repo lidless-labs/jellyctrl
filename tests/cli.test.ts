@@ -103,6 +103,7 @@ describe("parseArgs", () => {
       json: false,
       limit: 50,
       minDate: "2026-01-01T00:00:00Z",
+      includeDetails: false,
     });
     expect(parseArgs(["playlists", "--user", "u1"])).toEqual({ kind: "playlists", json: false, userId: "u1" });
     expect(parseArgs(["playlist", "pl1", "--user", "u1"])).toEqual({
@@ -193,6 +194,27 @@ describe("run", () => {
     const { deps } = capture(client);
     expect(await run(["search", "the wire", "--type", "Series", "--limit", "7"], deps)).toBe(0);
     expect(client.searchItems).toHaveBeenCalledWith("the wire", "Series", 7);
+  });
+
+  it.each([false, true])("includes activity details in CLI JSON only when requested: %s", async (includeDetails) => {
+    const summary = { Id: 1, Name: "Example activity" };
+    const detailed = { ...summary, ShortOverview: "Example summary", Overview: "Example detail" };
+    const client = { getActivityLog: vi.fn().mockResolvedValue({ Items: [detailed], TotalRecordCount: 1 }) };
+    const { out, deps } = capture(client);
+    const args = ["activity", "--json"];
+    if (includeDetails) args.push("--include-details");
+    expect(await run(args, deps)).toBe(0);
+    expect(JSON.parse(out.join("\n"))).toEqual({
+      Items: [includeDetails ? detailed : summary], TotalRecordCount: 1,
+    });
+  });
+
+  it("passes existing activity flags through the options signature", async () => {
+    const client = { getActivityLog: vi.fn().mockResolvedValue({ Items: [], TotalRecordCount: 0 }) };
+    const { out, deps } = capture(client);
+    expect(await run(["activity", "--limit", "50", "--min-date", "2026-01-01T00:00:00Z", "--json"], deps)).toBe(0);
+    expect(client.getActivityLog).toHaveBeenCalledWith({ limit: 50, minDate: "2026-01-01T00:00:00Z" });
+    expect(JSON.parse(out.join("\n"))).toEqual({ Items: [], TotalRecordCount: 0 });
   });
 
   it("filters sessions to active-only without touching the server", async () => {
