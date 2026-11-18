@@ -2,10 +2,12 @@ import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { Cause, Effect, Exit } from "effect";
+import { z } from "zod";
 import { JellyfinClient } from "./client.js";
 import { getConfig } from "./config.js";
 import { fromPromise } from "./effect/tool-adapter.js";
 import { getHealthBrief, healthBriefSchema, type HealthBriefOptions } from "./tools/health-brief.js";
+import { findDuplicates, findMissingMetadata, libraryInput, libraryItemsInput, listLibraryItems, missingMetadataInput } from "./tools/hygiene.js";
 import type {
   ActivityLogResponse,
   Item,
@@ -37,6 +39,9 @@ export type Parsed =
   | { kind: "status"; json: boolean }
   | { kind: "health-brief"; options: HealthBriefOptions }
   | { kind: "libraries"; json: boolean }
+  | { kind: "library-items"; query: z.output<z.ZodObject<typeof libraryItemsInput>> }
+  | { kind: "missing-metadata"; query: z.output<z.ZodObject<typeof missingMetadataInput>> }
+  | { kind: "duplicates"; query: z.output<z.ZodObject<typeof libraryInput>> }
   | { kind: "users"; json: boolean }
   | { kind: "sessions"; json: boolean; activeOnly: boolean }
   | { kind: "search"; json: boolean; query: string; types?: string; limit: number }
@@ -70,6 +75,9 @@ Users & sessions:
 
 Content:
   search <query>             Search the library by name
+  library-items <libraryId>  One compact page from a library (JSON)
+  missing-metadata <libraryId>   Counts and examples of missing metadata (JSON)
+  duplicates <libraryId>     Candidate duplicate groups and versions (JSON)
   item <itemId> --user <id>  Full metadata for one item
   recent --user <id>         Recently added items (per-user 'latest' view)
 
@@ -100,6 +108,13 @@ Command options:
   sessions   --active-only            Only sessions with a now-playing item
   search     --type <t,...>           Comma-separated item types (Movie,Series,Episode,...)
              --limit <n>              Max results, 1-200            (default 20)
+  library-items --type <t,...>        Comma-separated item types
+                --limit <n>           Page size, 1-200              (default 25)
+                --include-path        Include filesystem paths
+                --include-overview    Include overview text
+  missing-metadata --type <t,...>     Item types (default Movie,Series,Episode)
+  library-items, missing-metadata, duplicates
+                --cursor <cursor>     Continue with the same query
   recent     --limit <n>              Max results, 1-100            (default 20)
   resume     --limit <n>              Max results, 1-100            (default 20)
   next-up    --series <id>            Restrict to one series
@@ -199,6 +214,36 @@ export function parseArgs(argv: string[]): Parsed {
     case "libraries":
       ensureNoExtra(args);
       return { kind: "libraries", json };
+    case "library-items":
+    case "missing-metadata":
+    case "duplicates": {
+      const cursor = takeOption(args, "--cursor");
+      const libraryId = takePositional(args, "<libraryId>");
+      const base = { libraryId, cursor };
+      if (cmd === "library-items") {
+        const includeItemTypes = takeOption(args, "--type")?.split(",").map((type) => type.trim());
+        const limit = requireInt(takeOption(args, "--limit"), "--limit", 1, 200, 25);
+        const includePath = takeFlag(args, "--include-path");
+        const includeOverview = takeFlag(args, "--include-overview");
+        ensureNoExtra(args);
+        const query = z.object(libraryItemsInput).safeParse({
+          ...base, includeItemTypes, limit, includePath, includeOverview,
+        });
+        if (!query.success) throw new UsageError("Invalid library ID, cursor or item types.");
+        return { kind: cmd, query: query.data };
+      }
+      if (cmd === "missing-metadata") {
+        const includeItemTypes = takeOption(args, "--type")?.split(",").map((type) => type.trim());
+        ensureNoExtra(args);
+        const query = z.object(missingMetadataInput).safeParse({ ...base, includeItemTypes });
+        if (!query.success) throw new UsageError("Invalid library ID, cursor or item types.");
+        return { kind: cmd, query: query.data };
+      }
+      ensureNoExtra(args);
+      const query = z.object(libraryInput).safeParse(base);
+      if (!query.success) throw new UsageError("Invalid library ID or cursor.");
+      return { kind: cmd, query: query.data };
+    }
     case "users":
       ensureNoExtra(args);
       return { kind: "users", json };
@@ -504,6 +549,17 @@ function dispatch(
       case "libraries": {
         const r = yield* fromPromise(() => client.listLibraries());
         return emit(r, () => renderLibraries(r), parsed.json);
+      }
+      case "library-items":
+      case "missing-metadata":
+      case "duplicates": {
+        const result = yield* fromPromise(async () => {
+          if (parsed.kind === "library-items") return listLibraryItems(client, parsed.query);
+          if (parsed.kind === "missing-metadata") return findMissingMetadata(client, parsed.query);
+          return findDuplicates(client, parsed.query);
+        });
+        deps.out(JSON.stringify(result, null, 2));
+        return 0;
       }
       case "users": {
         const r = yield* fromPromise(() => client.listUsers());

@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP bearer tokens can be scoped to read, routine, or high-impact access.
   Each request uses its token's policy for tool discovery and calls, including
   batches. The legacy token still uses `JELLYFIN_MCP_REMOTE_MODE`.
+- Library hygiene tools for compact item paging, missing metadata counts, and
+  duplicate and multi-version candidates. The read commands are also available
+  in the CLI. MCP can queue a confirmed item refresh with explicit replacement
+  options.
 
 ### Changed
 

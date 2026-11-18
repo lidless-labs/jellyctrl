@@ -6,6 +6,7 @@ import { registerAccessTools } from "./tools/access.js";
 import { registerCollectionTools } from "./tools/collections.js";
 import { registerDiscoveryTools } from "./tools/discovery.js";
 import { registerHealthBriefTool } from "./tools/health-brief.js";
+import { registerHygieneTools } from "./tools/hygiene.js";
 import { registerItemTools } from "./tools/items.js";
 import { registerLibraryTools } from "./tools/libraries.js";
 import { registerPlaylistTools } from "./tools/playlists.js";
@@ -29,6 +30,7 @@ export function registerAllTools(server: McpServer, client: JellyfinClient): voi
   registerHealthBriefTool(server, client);
   registerAccessTools(server, client);
   registerLibraryTools(server, client);
+  registerHygieneTools(server, client);
   registerUserTools(server, client);
   registerSessionTools(server, client);
   registerItemTools(server, client);
