@@ -263,19 +263,20 @@ export class JellyfinClient {
     }
 
     const libraries = await this.listLibraries();
-    if (!libraryId || !libraries.some((library) => library.ItemId === libraryId)) {
+    const normalizedId = libraryId.toLowerCase();
+    const library = libraries.find((entry) => entry.ItemId?.toLowerCase() === normalizedId);
+    if (!libraryId || !library) {
       throw new Error("Unknown library ID. Use an ID from jellyfin_list_libraries.");
     }
 
     const params = new URLSearchParams({
-      recursive: "true",
       metadataRefreshMode: "Default",
       imageRefreshMode: "Default",
       replaceAllMetadata: "false",
       replaceAllImages: "false",
     });
     await this.request(
-      `/Items/${encodeURIComponent(libraryId)}/Refresh?${params}`,
+      `/Items/${encodeURIComponent(library.ItemId)}/Refresh?${params}`,
       { method: "POST" },
       false,
     );

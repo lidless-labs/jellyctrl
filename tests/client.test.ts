@@ -265,19 +265,19 @@ describe("JellyfinClient", () => {
     await expect(client.stopSession("session-1")).resolves.toBeUndefined();
   });
 
-  it("queues an item refresh only for a known library", async () => {
+  it.each([false, true])("queues an item refresh for a known library (uppercase input: %s)", async (uppercase) => {
+    const libraryId = "1a2b3c4d-5678-4321-8765-abcdef012345";
     fetchMock
-      .mockResolvedValueOnce(Response.json([{ ItemId: "lib-abc" }, { ItemId: "lib-other" }]))
+      .mockResolvedValueOnce(Response.json([{ ItemId: libraryId }, { ItemId: "lib-other" }]))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
-    await client.scanLibraries("lib-abc");
+    await client.scanLibraries(uppercase ? libraryId.toUpperCase() : libraryId);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0][0]).toBe("http://jellyfin.test/Library/VirtualFolders");
     const [url, options] = fetchMock.mock.calls[1];
     const refresh = new URL(url);
-    expect(refresh.pathname).toBe("/Items/lib-abc/Refresh");
+    expect(refresh.pathname).toBe(`/Items/${libraryId}/Refresh`);
     expect(options.method).toBe("POST");
     expect(Object.fromEntries(refresh.searchParams)).toEqual({
-      recursive: "true",
       metadataRefreshMode: "Default",
       imageRefreshMode: "Default",
       replaceAllMetadata: "false",
