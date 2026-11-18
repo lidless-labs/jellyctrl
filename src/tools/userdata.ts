@@ -120,9 +120,10 @@ function getBoundedResumeItems(
   client: JellyfinClient,
   userId: string,
   pageSize: number,
-): Effect.Effect<{ totalResumeCount: number; items: Item[]; truncated: boolean }, unknown, never> {
+  seriesId?: string,
+): Effect.Effect<{ totalResumeCount: number | null; items: Item[]; truncated: boolean }, unknown, never> {
   return Effect.gen(function* () {
-    let totalResumeCount = 0;
+    let totalResumeCount: number | null = null;
     let truncated = false;
     const items: Item[] = [];
 
@@ -130,10 +131,13 @@ function getBoundedResumeItems(
       const startIndex = items.length;
       const remaining = MAX_RESUME_ITEMS - startIndex;
       const limit = Math.min(pageSize, remaining);
-      const resume = yield* fromPromise(() => client.getResumeItems(userId, limit, startIndex));
-      totalResumeCount = resume.TotalRecordCount;
+      const resume = yield* fromPromise(() => client.getResumeItems(userId, limit, startIndex, seriesId));
+      const total = resume.TotalRecordCount;
+      totalResumeCount = Number.isInteger(total) && total >= 0 ? total : null;
       items.push(...resume.Items.slice(0, remaining));
-      truncated = items.length < totalResumeCount || resume.Items.length > remaining;
+      truncated = totalResumeCount === null
+        ? resume.Items.length >= limit
+        : items.length < totalResumeCount || resume.Items.length > remaining;
       if (!truncated || resume.Items.length === 0) break;
     }
 
@@ -182,7 +186,7 @@ function selectContinueWatchingItems(
       };
     }
 
-    const resume = yield* getBoundedResumeItems(client, userId, pageSize);
+    const resume = yield* getBoundedResumeItems(client, userId, pageSize, filters.seriesId);
     return {
       ...resume,
       items: resume.items.filter((item) => matchesFilters(item, filters)),

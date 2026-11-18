@@ -488,12 +488,29 @@ export class JellyfinClient {
   // ── Discovery (Resume / NextUp / Similar) ─────────────────────────────────
   // Resume is per-user: Jellyfin tracks playback position on the user row, not
   // the item row. Episodes and movies with PlaybackPositionTicks > 0 show up.
-  async getResumeItems(userId: string, limit = 20, startIndex = 0): Promise<ItemsResponse> {
+  async getResumeItems(userId: string, limit = 20, startIndex = 0, parentId?: string): Promise<ItemsResponse> {
+    if (parentId) {
+      const params = new URLSearchParams({
+        userId,
+        parentId,
+        limit: String(limit),
+        startIndex: String(startIndex),
+        enableUserData: "true",
+        enableTotalRecordCount: "true",
+      });
+      try {
+        return await this.request<ItemsResponse>(`/UserItems/Resume?${params.toString()}`);
+      } catch (error) {
+        if (!isNotFoundError(error)) throw error;
+      }
+    }
+
     const params = new URLSearchParams({
       Limit: String(limit),
       StartIndex: String(startIndex),
       Fields: "SeriesName,SeriesId,ProductionYear,UserData",
     });
+    if (parentId) params.set("parentId", parentId);
     return this.request<ItemsResponse>(
       `/Users/${encodeURIComponent(userId)}/Items/Resume?${params.toString()}`,
     );

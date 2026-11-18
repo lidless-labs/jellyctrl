@@ -190,13 +190,36 @@ describe("user data tools", () => {
       confirm: true,
     });
 
-    expect(client.getResumeItems).toHaveBeenNthCalledWith(1, "user-42", 25, 0);
-    expect(client.getResumeItems).toHaveBeenNthCalledWith(2, "user-42", 25, 2);
+    expect(client.getResumeItems).toHaveBeenNthCalledWith(1, "user-42", 25, 0, undefined);
+    expect(client.getResumeItems).toHaveBeenNthCalledWith(2, "user-42", 25, 2, undefined);
     expect(client.clearPlaybackPosition).toHaveBeenCalledTimes(3);
     expect(parseResult(result)).toMatchObject({
       clearedCount: 3,
       totalResumeCount: 3,
     });
+  });
+
+  it.each([
+    { total: 25, pageSize: 25, count: undefined, offsets: [0, 25], matchedCount: 25, truncated: false },
+    { total: 28, pageSize: 25, count: undefined, offsets: [0, 25], matchedCount: 28, truncated: false },
+    { total: 200, pageSize: 25, count: 200.5, offsets: [0, 25, 50, 75], matchedCount: 100, truncated: true },
+    { total: 200, pageSize: 50, count: undefined, offsets: [0, 50, 100], matchedCount: 125, truncated: true },
+  ])("bounds a resume scan with unknown total ($total entries, page size $pageSize)", async ({
+    total, pageSize, count, offsets, matchedCount, truncated,
+  }) => {
+    const getResumeItems = vi.fn(async (_userId: string, limit: number, startIndex: number) => ({
+      TotalRecordCount: count,
+      Items: Array.from({ length: Math.min(limit, total - startIndex) }, (_, index) => ({
+        Id: String(startIndex + index), Name: "Episode", Type: "Episode",
+      })),
+    }));
+    const { server, tools } = makeFakeServer();
+    registerUserDataTools(server as never, { getResumeItems } as unknown as JellyfinClient);
+    const tool = tools.get("jellyfin_preview_continue_watching_clear")!;
+    const result = await tool.handler(z.object(tool.schema).parse({ userId: "user-42", pageSize }));
+
+    expect(getResumeItems.mock.calls.map(([, , startIndex]) => startIndex)).toEqual(offsets);
+    expect(parseResult(result)).toMatchObject({ totalResumeCount: null, matchedCount, truncated });
   });
 
   it("returns zero cleared items for an empty resume queue", async () => {
@@ -497,12 +520,57 @@ describe("user data tools", () => {
     expect(parseResult(result).keptItem).toEqual(expect.objectContaining({ id: "ep-2" }));
   });
 
+  it.each([false, true])("keeps the latest of three series episodes in a 200-entry resume queue (legacy: %s)", async (legacy) => {
+    const queue = Array.from({ length: 200 }, (_, index) => ({
+      Id: `ep-${index}`,
+      Name: "Episode",
+      Type: "Episode",
+      SeriesId: index >= 197 ? "series-1" : "series-other",
+      UserData: { PlaybackPositionTicks: 10_000_000, LastPlayedDate: new Date(index * 1000).toISOString() },
+    }));
+    const reads: string[] = [];
+    const writes: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init: RequestInit) => {
+      const url = new URL(input);
+      if (init.method === "POST" && url.pathname.endsWith("/UserData")) {
+        writes.push(JSON.parse(String(init.body)).ItemId);
+        return Response.json({});
+      }
+      if (url.pathname === "/UserItems/Resume" || url.pathname === "/Users/user-42/Items/Resume") {
+        reads.push(url.pathname);
+        if (legacy && url.pathname === "/UserItems/Resume") return new Response(null, { status: 404 });
+        const parentId = url.searchParams.get("parentId");
+        const scoped = parentId ? queue.filter((item) => item.SeriesId === parentId) : queue;
+        const start = Number(url.searchParams.get("startIndex") ?? url.searchParams.get("StartIndex"));
+        const limit = Number(url.searchParams.get("limit") ?? url.searchParams.get("Limit"));
+        if (url.pathname === "/UserItems/Resume") expect(url.searchParams.get("userId")).toBe("user-42");
+        return Response.json({ TotalRecordCount: scoped.length, Items: scoped.slice(start, start + limit) });
+      }
+      throw new Error("Unexpected Jellyfin request");
+    }));
+    const { server, tools } = makeFakeServer();
+    registerUserDataTools(server as never, new JellyfinClient({
+      url: "https://jellyfin.test", apiKey: "test-key", verifySsl: true, timeout: 5000,
+    }));
+    const tool = tools.get("jellyfin_clear_episode_continue_watching_except_latest")!;
+    const result = await tool.handler(z.object(tool.schema).parse({
+      userId: "user-42", seriesId: "series-1", confirm: true,
+    }));
+
+    expect(parseResult(result)).toMatchObject({
+      totalResumeCount: 3, truncated: false, clearedCount: 2, keptItem: { id: "ep-199" },
+    });
+    expect(reads).toEqual(legacy ? ["/UserItems/Resume", "/Users/user-42/Items/Resume"] : ["/UserItems/Resume"]);
+    expect(writes).toEqual(["ep-198", "ep-197"]);
+  });
+
   it("refuses to keep a latest episode when the resume queue scan is truncated", async () => {
     const fetch = vi.fn(async (input: string, init: RequestInit) => {
       expect(init.method ?? "GET").toBe("GET");
       const url = new URL(input);
-      expect(url.pathname).toBe("/Users/user-42/Items/Resume");
-      expect(url.searchParams.get("Limit")).toBe("125");
+      expect(url.pathname).toBe("/UserItems/Resume");
+      expect(url.searchParams.get("parentId")).toBe("series-1");
+      expect(url.searchParams.get("limit")).toBe("125");
       return Response.json({
         TotalRecordCount: 126,
         Items: Array.from({ length: 125 }, (_, index) => ({
