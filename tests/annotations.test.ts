@@ -56,6 +56,7 @@ const DESTRUCTIVE_TOOLS = [
   "jellyfin_unset_favorite",
   "jellyfin_restart_server",
   "jellyfin_shutdown_server",
+  "jellyfin_scan_library",
   "jellyfin_delete_user",
   "jellyfin_set_user_disabled",
   "jellyfin_set_user_password",

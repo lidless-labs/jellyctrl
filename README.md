@@ -128,7 +128,7 @@ Do not expose this listener directly or change it to a non-loopback bind. For re
 Playback controls, messages, account creation, user-data changes, and playlist or collection updates require `confirm: true`.
 
 ### System
-- `jellyfin_get_status` - server name, version, OS, pending restart, update availability
+- `jellyfin_get_status` - server name, version, OS, pending restart, update availability. A `null` restart or update flag means unknown.
 - `jellyfin_list_plugins` - installed plugin counts by status and summaries for non-Active plugins. Set `includeDetails: true` for all plugins with versions, descriptions, and uninstallability.
 - `jellyfin_restart_server` - restart the Jellyfin process *(requires `confirm: true`)*
 - `jellyfin_shutdown_server` - stop the Jellyfin process *(requires `confirm: true`)*
@@ -146,7 +146,7 @@ for absent optional metadata. The device total reflects all matching devices. Ea
 
 ### Libraries
 - `jellyfin_list_libraries` - all virtual folders with IDs, collection types, paths
-- `jellyfin_scan_library` - trigger a Jellyfin library scan
+- `jellyfin_scan_library` - queue a scan. Pass `confirm: true` for a full scan. Pass a `libraryId` from `jellyfin_list_libraries` to refresh one library without confirmation or forced replacement of metadata and images.
 
 ### Users
 - `jellyfin_list_users` - with admin / disabled flags and last login timestamps
@@ -232,7 +232,7 @@ Use the returned `totalCount` to decide whether to request another page.
 
 ## CLI
 
-`jellyctrl` is the primary operator interface for shells, cron, and CI. It shares the `JellyfinClient` core with the MCP adapter and reads the same env config. The current CLI exposes the read/report/lookup commands; playback control, user management, library scans, and other write operations stay in the MCP surface behind the `confirm: true` gates.
+`jellyctrl` is the primary operator interface for shells, cron, and CI. It shares the `JellyfinClient` core with the MCP adapter and reads the same env config. The CLI exposes read, report, and lookup commands. Playback control, user management, and library scanning are available through MCP. The text output of `jellyctrl status` shows `unknown` for absent restart or update flags.
 
 ```bash
 npx jellyfin-mcp@latest status
@@ -453,7 +453,7 @@ Calls `jellyfin_list_sessions`, finds the session by device name, then `jellyfin
 
 > Scan the Jellyfin libraries
 
-Calls `jellyfin_scan_library`.
+Calls `jellyfin_scan_library` with `confirm: true` after you confirm the full scan.
 
 > Send a message to my partner's Jellyfin that dinner is ready
 
