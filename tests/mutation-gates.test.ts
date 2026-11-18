@@ -56,10 +56,7 @@ const requiredInputs = {
 };
 
 describe("mutation confirmation policy", () => {
-  // Library refresh behavior is handled separately.
-  const registeredWrites = [...capture().tools].filter(([name, tool]) =>
-    !tool.annotations.readOnlyHint && name !== "jellyfin_scan_library",
-  );
+  const registeredWrites = [...capture().tools].filter(([, tool]) => !tool.annotations.readOnlyHint);
 
   it.each(registeredWrites)("%s refuses absent or false confirmation before any client call", async (name) => {
     for (const confirm of [undefined, false]) {

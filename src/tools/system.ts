@@ -41,7 +41,7 @@ export function registerSystemTools(server: McpServer, client: JellyfinClient): 
 
   server.tool(
     "jellyfin_get_status",
-    "Get Jellyfin server info: name, version, OS, architecture, local address, pending restart, update availability.",
+    "Get Jellyfin server info including name, version, OS, architecture, local address, pending restart, and update availability. A null restart or update flag means unknown.",
     {},
     READ_ONLY,
     toToolHandler(() =>
@@ -54,8 +54,8 @@ export function registerSystemTools(server: McpServer, client: JellyfinClient): 
           os: info.OperatingSystemDisplayName ?? null,
           architecture: info.SystemArchitecture ?? null,
           localAddress: info.LocalAddress ?? null,
-          hasPendingRestart: info.HasPendingRestart ?? false,
-          hasUpdateAvailable: info.HasUpdateAvailable ?? false,
+          hasPendingRestart: info.HasPendingRestart ?? null,
+          hasUpdateAvailable: info.HasUpdateAvailable ?? null,
         });
       })),
     ),
