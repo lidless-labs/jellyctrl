@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Continue Watching preview and clear accept up to 100 explicit item IDs.
+  Queue scans require a page size of at least 25 and stop after four pages or
+  125 items. Results report `truncated` when some entries could remain unread.
+  The series cleanup that keeps the latest episode requires a complete scan.
+- The health brief keeps activity counts already read and reports the source
+  as partial if Jellyfin returns a smaller total on a later page. An active
+  library scan reports `inProgress: true` and `overdue: false`. An idle scan
+  with a missing prior completion status reports `overdue: null`.
 - `jellyfin_scan_library` requires confirmation for a full scan and queues a
   scoped refresh when given a valid library ID.
 - Missing restart and update flags mean unknown. `jellyfin_get_status` returns

@@ -86,16 +86,27 @@ function summarizeScan(tasks: ScheduledTask[], now: number) {
   }).filter((hours) => Number.isFinite(hours) && hours > 0);
   const intervalHours = intervals.length ? Math.min(...intervals) : null;
   const lastResult = scan.LastExecutionResult;
+  const inProgress = scan.State === "Running";
   const lastRunAt = lastResult?.EndTimeUtc ?? null;
   const lastRun = timestamp(lastRunAt);
-  const overdueByInterval = lastRun === null || intervalHours === null
-    ? null
-    : now - lastRun > intervalHours * MS_PER_HOUR;
-  return {
-    lastRunAt,
-    intervalHours,
-    overdue: lastResult != null && lastResult.Status !== "Completed" ? true : overdueByInterval,
-  };
+  let overdue: boolean | null = null;
+  if (inProgress) {
+    overdue = false;
+  } else {
+    switch (lastResult?.Status) {
+      case "Completed":
+        if (lastRun !== null && intervalHours !== null) {
+          overdue = now - lastRun > intervalHours * MS_PER_HOUR;
+        }
+        break;
+      case "Failed":
+      case "Aborted":
+      case "Cancelled":
+        overdue = true;
+        break;
+    }
+  }
+  return { lastRunAt, intervalHours, inProgress, overdue };
 }
 
 const storagePathFields = {
@@ -191,6 +202,8 @@ async function summarizeActivity(client: JellyfinClient, minDate: string, maxDat
   const counts = new Map<string, number>();
   const clusters = new Map<string, { type: string; itemId: string | null; count: number; lastAt: string }>();
   let startIndex = 0;
+  let firstTotal: number | undefined;
+  let complete = true;
   let total: number;
   do {
     const page = await client.getActivityLog({ startIndex, limit: 200, minDate, maxDate });
@@ -198,6 +211,8 @@ async function summarizeActivity(client: JellyfinClient, minDate: string, maxDat
     if (!Number.isSafeInteger(total) || total < 0 || (startIndex < total && !page.Items.length)) {
       throw new Error("Incomplete Jellyfin activity log");
     }
+    firstTotal ??= total;
+    if (total < firstTotal) complete = false;
     for (const entry of page.Items) {
       increment(counts, entry.Severity ?? UNKNOWN);
       if ((entry.Severity !== "Error" && entry.Severity !== "Critical") ||
@@ -215,7 +230,10 @@ async function summarizeActivity(client: JellyfinClient, minDate: string, maxDat
   const exceptions = [...clusters.values()]
     .sort((a, b) => b.count - a.count || Date.parse(b.lastAt) - Date.parse(a.lastAt))
     .slice(0, EXCEPTION_LIMIT);
-  return { bySeverity: Object.fromEntries(counts), errorClusterCount: clusters.size, exceptions };
+  return {
+    complete,
+    summary: { bySeverity: Object.fromEntries(counts), errorClusterCount: clusters.size, exceptions },
+  };
 }
 
 async function readSource<T>(read: () => Promise<T>): Promise<T | typeof UNKNOWN> {
@@ -250,6 +268,7 @@ export async function getHealthBrief(client: JellyfinClient, options: HealthBrie
   ]);
   const sources = { server, sessions, tasks: scheduled, storage, plugins, activity };
   const failedSources = Object.keys(sources).filter((source) => sources[source as keyof typeof sources] === UNKNOWN);
+  if (activity !== UNKNOWN && !activity.complete) failedSources.push("activity");
   return {
     asOf,
     windowHours: options.windowHours,
@@ -260,7 +279,7 @@ export async function getHealthBrief(client: JellyfinClient, options: HealthBrie
     tasks: scheduled === UNKNOWN ? UNKNOWN : scheduled.tasks,
     storage,
     plugins,
-    activity,
+    activity: activity === UNKNOWN ? UNKNOWN : activity.summary,
     scanFreshness: scheduled === UNKNOWN ? UNKNOWN : scheduled.scanFreshness,
   };
 }

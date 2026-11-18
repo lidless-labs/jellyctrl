@@ -91,7 +91,7 @@ describe("jellyfin_health_brief", () => {
       },
       plugins: { byStatus: { Active: 1 }, malfunctioned: 0, notSupported: 0, restartRequired: 0, exceptions: [] },
       activity: { bySeverity: { Information: 1 }, errorClusterCount: 0, exceptions: [] },
-      scanFreshness: { lastRunAt: scanAt, intervalHours: 12, overdue: false },
+      scanFreshness: { lastRunAt: scanAt, intervalHours: 12, inProgress: false, overdue: false },
     });
   });
 
@@ -148,7 +148,22 @@ describe("jellyfin_health_brief", () => {
     const { brief } = await callBrief({}, (url) => url.pathname === "/ScheduledTasks" ? Response.json([
       { ...scan, LastExecutionResult: { EndTimeUtc: lastRunAt, Status } },
     ]) : undefined);
-    expect(brief.scanFreshness).toEqual({ lastRunAt, intervalHours: 12, overdue: true });
+    expect(brief.scanFreshness).toEqual({ lastRunAt, intervalHours: 12, inProgress: false, overdue: true });
+  });
+
+  it("reports a running library scan in progress after a cancelled run", async () => {
+    const { brief } = await callBrief({}, (url) => url.pathname === "/ScheduledTasks" ? Response.json([
+      { ...scan, State: "Running", LastExecutionResult: { EndTimeUtc: scanAt, Status: "Cancelled" } },
+    ]) : undefined);
+    expect(brief.scanFreshness).toMatchObject({ inProgress: true, overdue: false });
+  });
+
+  it("reports overdue status as unknown when the last result has no status", async () => {
+    const lastRunAt = "2026-01-19T06:00:00.000Z";
+    const { brief } = await callBrief({}, (url) => url.pathname === "/ScheduledTasks" ? Response.json([
+      { ...scan, State: "Idle", LastExecutionResult: { EndTimeUtc: lastRunAt } },
+    ]) : undefined);
+    expect(brief.scanFreshness).toMatchObject({ lastRunAt, inProgress: false, overdue: null });
   });
 
   it("flags either free-space threshold and counts a shared volume once", async () => {
@@ -207,11 +222,11 @@ describe("jellyfin_health_brief", () => {
     });
   });
 
-  it("keeps activity already read when pruning leaves the final page empty", async () => {
+  it.each([190, 230])("reports partial activity when pruning drops the count to %i", async (finalTotal) => {
     const pages = new Map([
       [0, { count: 200, total: 250 }],
-      [200, { count: 30, total: 240 }],
-      [230, { count: 0, total: 230 }],
+      [200, finalTotal === 190 ? { count: 0, total: 190 } : { count: 30, total: 240 }],
+      [230, { count: 0, total: finalTotal }],
     ]);
     const offsets: number[] = [];
     const { brief } = await callBrief({}, (url) => {
@@ -225,10 +240,10 @@ describe("jellyfin_health_brief", () => {
       }));
       return Response.json({ Items: items, TotalRecordCount: page.total });
     });
-    expect(offsets).toEqual([0, 200, 230]);
+    expect(offsets).toEqual(finalTotal === 190 ? [0, 200] : [0, 200, 230]);
     expect(brief).toMatchObject({
-      complete: true, failedSources: [],
-      activity: { bySeverity: { Information: 230 }, errorClusterCount: 0, exceptions: [] },
+      complete: false, failedSources: ["activity"],
+      activity: { bySeverity: { Information: finalTotal === 190 ? 200 : 230 }, errorClusterCount: 0, exceptions: [] },
     });
   });
 

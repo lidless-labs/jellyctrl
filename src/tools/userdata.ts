@@ -4,9 +4,12 @@ import { z } from "zod";
 import type { JellyfinClient } from "../client.js";
 import { fromPromise, toolResult, toToolHandler } from "../effect/tool-adapter.js";
 import type { Item, UserItemData } from "../types.js";
-import { ok, refuseUnconfirmed, DESTRUCTIVE, NON_DESTRUCTIVE, READ_ONLY } from "./_util.js";
+import { fail, ok, refuseUnconfirmed, DESTRUCTIVE, NON_DESTRUCTIVE, READ_ONLY } from "./_util.js";
 
 const TICKS_PER_SECOND = 10_000_000;
+const MAX_EXPLICIT_ITEM_IDS = 100;
+const MAX_RESUME_PAGES = 4;
+const MAX_RESUME_ITEMS = 125;
 const ticksToSeconds = (ticks: number | undefined | null): number | null =>
   typeof ticks === "number" ? Math.round(ticks / TICKS_PER_SECOND) : null;
 
@@ -35,6 +38,7 @@ interface ClearResult {
 
 interface ItemSelection {
   totalResumeCount: number | null;
+  truncated: boolean;
   items: Item[];
   failed: { item: Item; error: string }[];
 }
@@ -113,25 +117,28 @@ function matchesFilters(item: Item, filters: ContinueWatchingFilters): boolean {
   return true;
 }
 
-function getAllResumeItems(
+function getBoundedResumeItems(
   client: JellyfinClient,
   userId: string,
   pageSize: number,
-): Effect.Effect<{ totalResumeCount: number; items: Item[] }, unknown, never> {
+): Effect.Effect<{ totalResumeCount: number; items: Item[]; truncated: boolean }, unknown, never> {
   return Effect.gen(function* () {
-    let totalResumeCount: number | null = null;
-    let startIndex = 0;
+    let totalResumeCount = 0;
+    let truncated = false;
     const items: Item[] = [];
 
-    while (totalResumeCount === null || startIndex < totalResumeCount) {
-      const resume = yield* fromPromise(() => client.getResumeItems(userId, pageSize, startIndex));
+    for (let page = 0; page < MAX_RESUME_PAGES && items.length < MAX_RESUME_ITEMS; page++) {
+      const startIndex = items.length;
+      const remaining = MAX_RESUME_ITEMS - startIndex;
+      const limit = Math.min(pageSize, remaining);
+      const resume = yield* fromPromise(() => client.getResumeItems(userId, limit, startIndex));
       totalResumeCount = resume.TotalRecordCount;
-      items.push(...resume.Items);
-      if (resume.Items.length === 0) break;
-      startIndex += resume.Items.length;
+      items.push(...resume.Items.slice(0, remaining));
+      truncated = items.length < totalResumeCount || resume.Items.length > remaining;
+      if (!truncated || resume.Items.length === 0) break;
     }
 
-    return { totalResumeCount: totalResumeCount ?? 0, items };
+    return { totalResumeCount, items, truncated };
   });
 }
 
@@ -170,14 +177,15 @@ function selectContinueWatchingItems(
       const hydrated = yield* hydrateExplicitItems(client, userId, itemIds);
       return {
         totalResumeCount: null,
+        truncated: false,
         items: hydrated.items.filter((item) => matchesFilters(item, filters)),
         failed: hydrated.failed,
       };
     }
 
-    const resume = yield* getAllResumeItems(client, userId, pageSize);
+    const resume = yield* getBoundedResumeItems(client, userId, pageSize);
     return {
-      totalResumeCount: resume.totalResumeCount,
+      ...resume,
       items: resume.items.filter((item) => matchesFilters(item, filters)),
       failed: [],
     };
@@ -210,12 +218,13 @@ function clearItems(
 
 function clearResultPayload(
   userId: string,
-  totalResumeCount: number | null,
+  selection: ItemSelection,
   result: ClearResult,
 ): Record<string, unknown> {
   return {
     userId,
-    totalResumeCount,
+    totalResumeCount: selection.totalResumeCount,
+    truncated: selection.truncated,
     partialFailure: result.failed.length > 0,
     clearedCount: result.cleared.length,
     failedCount: result.failed.length,
@@ -230,6 +239,10 @@ function clearResultPayload(
 function resultWithPartialFailure(payload: Record<string, unknown>) {
   return ok(payload);
 }
+
+const clearItemIdsSchema = z.array(z.string().trim().min(1)).min(1).max(MAX_EXPLICIT_ITEM_IDS).optional();
+const resumePageSizeSchema = z.number().int().min(25).max(500).default(100)
+  .describe(`Resume queue page size when itemIds is omitted. The scan reads at most ${MAX_RESUME_PAGES} pages or ${MAX_RESUME_ITEMS} items.`);
 
 const itemTypesSchema = z
   .array(z.enum(CONTINUE_WATCHING_TYPES))
@@ -289,12 +302,9 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
     "Preview which Continue Watching entries would be cleared for a user. Supports the same filters as jellyfin_clear_continue_watching and makes no changes.",
     {
       userId: z.string().trim().min(1).describe("User ID whose Continue Watching queue should be previewed."),
-      itemIds: z
-        .array(z.string().trim().min(1))
-        .min(1)
-        .optional()
+      itemIds: clearItemIdsSchema
         .describe("Optional explicit item IDs to preview. Omit to preview the filtered Continue Watching queue."),
-      pageSize: z.number().int().positive().max(500).optional().default(100),
+      pageSize: resumePageSizeSchema,
       ...filterSchema,
     },
     READ_ONLY,
@@ -310,6 +320,7 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
         return ok({
           userId,
           totalResumeCount: selection.totalResumeCount,
+          truncated: selection.truncated,
           matchedCount: selection.items.length,
           failedCount: selection.failed.length,
           items: selection.items.map(itemSummary),
@@ -331,19 +342,9 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
         .trim()
         .min(1)
         .describe("User ID whose Continue Watching queue should be cleared."),
-      itemIds: z
-        .array(z.string().trim().min(1))
-        .min(1)
-        .optional()
+      itemIds: clearItemIdsSchema
         .describe("Optional item IDs to clear. Omit to clear the filtered Continue Watching queue."),
-      pageSize: z
-        .number()
-        .int()
-        .positive()
-        .max(500)
-        .optional()
-        .default(100)
-        .describe("Resume queue page size when itemIds is omitted."),
+      pageSize: resumePageSizeSchema,
       ...filterSchema,
       confirm: z
         .boolean()
@@ -368,7 +369,7 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
         );
         const result = yield* clearItems(client, userId, selection.items);
         result.failed.push(...selection.failed);
-        const payload = clearResultPayload(userId, selection.totalResumeCount, result);
+        const payload = clearResultPayload(userId, selection, result);
         return result.failed.length > 0 ? resultWithPartialFailure(payload) : ok(payload);
       })),
     ),
@@ -380,7 +381,7 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
     {
       userId: z.string().trim().min(1).describe("User ID whose series resume entries should be cleared."),
       seriesId: z.string().trim().min(1).describe("Series ID to clear from Continue Watching."),
-      pageSize: z.number().int().positive().max(500).optional().default(100),
+      pageSize: resumePageSizeSchema,
       confirm: z.boolean().optional().describe("Must be true to proceed."),
     },
     DESTRUCTIVE,
@@ -401,7 +402,7 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
         );
         const result = yield* clearItems(client, userId, selection.items);
         result.failed.push(...selection.failed);
-        const payload = clearResultPayload(userId, selection.totalResumeCount, result);
+        const payload = clearResultPayload(userId, selection, result);
         return result.failed.length > 0 ? resultWithPartialFailure(payload) : ok(payload);
       })),
     ),
@@ -418,7 +419,7 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
         .optional()
         .default("lastPlayed")
         .describe("How to choose the one episode to keep."),
-      pageSize: z.number().int().positive().max(500).optional().default(100),
+      pageSize: resumePageSizeSchema,
       confirm: z.boolean().optional().describe("Must be true to proceed."),
     },
     DESTRUCTIVE,
@@ -437,6 +438,9 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
           undefined,
           { seriesId, itemTypes: ["Episode"] },
         );
+        if (selection.truncated) {
+          return fail("The resume queue scan was truncated. Cannot determine which episode to keep.");
+        }
         const sorted = [...selection.items].sort((a, b) =>
           keepBy === "episodeNumber"
             ? latestEpisodeScore(b) - latestEpisodeScore(a)
@@ -447,7 +451,7 @@ export function registerUserDataTools(server: McpServer, client: JellyfinClient)
         const result = yield* clearItems(client, userId, toClear);
         result.failed.push(...selection.failed);
         const payload = {
-          ...clearResultPayload(userId, selection.totalResumeCount, result),
+          ...clearResultPayload(userId, selection, result),
           keptItem: kept ? itemSummary(kept) : null,
         };
         return result.failed.length > 0 ? resultWithPartialFailure(payload) : ok(payload);
