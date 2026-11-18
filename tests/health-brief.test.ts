@@ -151,9 +151,9 @@ describe("jellyfin_health_brief", () => {
     expect(brief.scanFreshness).toEqual({ lastRunAt, intervalHours: 12, inProgress: false, overdue: true });
   });
 
-  it("reports a running library scan in progress after a cancelled run", async () => {
+  it.each(["Running", "Cancelling"])("reports a %s library scan in progress after a cancelled run", async (State) => {
     const { brief } = await callBrief({}, (url) => url.pathname === "/ScheduledTasks" ? Response.json([
-      { ...scan, State: "Running", LastExecutionResult: { EndTimeUtc: scanAt, Status: "Cancelled" } },
+      { ...scan, State, LastExecutionResult: { EndTimeUtc: scanAt, Status: "Cancelled" } },
     ]) : undefined);
     expect(brief.scanFreshness).toMatchObject({ inProgress: true, overdue: false });
   });

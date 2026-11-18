@@ -86,7 +86,7 @@ function summarizeScan(tasks: ScheduledTask[], now: number) {
   }).filter((hours) => Number.isFinite(hours) && hours > 0);
   const intervalHours = intervals.length ? Math.min(...intervals) : null;
   const lastResult = scan.LastExecutionResult;
-  const inProgress = scan.State === "Running";
+  const inProgress = scan.State === "Running" || scan.State === "Cancelling";
   const lastRunAt = lastResult?.EndTimeUtc ?? null;
   const lastRun = timestamp(lastRunAt);
   let overdue: boolean | null = null;
