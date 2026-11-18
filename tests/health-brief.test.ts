@@ -143,6 +143,14 @@ describe("jellyfin_health_brief", () => {
     expect(brief.scanFreshness.overdue).toBe(true);
   });
 
+  it.each(["Failed", "Aborted", "Cancelled"])("marks a recent %s library scan overdue", async (Status) => {
+    const lastRunAt = "2026-01-20T11:00:00.000Z";
+    const { brief } = await callBrief({}, (url) => url.pathname === "/ScheduledTasks" ? Response.json([
+      { ...scan, LastExecutionResult: { EndTimeUtc: lastRunAt, Status } },
+    ]) : undefined);
+    expect(brief.scanFreshness).toEqual({ lastRunAt, intervalHours: 12, overdue: true });
+  });
+
   it("flags either free-space threshold and counts a shared volume once", async () => {
     const { brief } = await callBrief({ minFreePercent: 25, minFreeGb: 60 }, (url) =>
       url.pathname === "/System/Info/Storage" ? Response.json({
@@ -196,6 +204,31 @@ describe("jellyfin_health_brief", () => {
         { type: "PlaybackError", itemId: "movie", count: 2, lastAt: asOf },
         { type: "TranscodeError", itemId: "show", count: 1, lastAt: scanAt },
       ],
+    });
+  });
+
+  it("keeps activity already read when pruning leaves the final page empty", async () => {
+    const pages = new Map([
+      [0, { count: 200, total: 250 }],
+      [200, { count: 30, total: 240 }],
+      [230, { count: 0, total: 230 }],
+    ]);
+    const offsets: number[] = [];
+    const { brief } = await callBrief({}, (url) => {
+      if (url.pathname !== "/System/ActivityLog/Entries") return;
+      const start = Number(url.searchParams.get("startIndex"));
+      offsets.push(start);
+      const page = pages.get(start);
+      if (!page) throw new Error("Unexpected activity page");
+      const items = Array.from({ length: page.count }, (_, index) => ({
+        Id: start + index, Date: scanAt, Severity: "Information", Type: "SessionStarted",
+      }));
+      return Response.json({ Items: items, TotalRecordCount: page.total });
+    });
+    expect(offsets).toEqual([0, 200, 230]);
+    expect(brief).toMatchObject({
+      complete: true, failedSources: [],
+      activity: { bySeverity: { Information: 230 }, errorClusterCount: 0, exceptions: [] },
     });
   });
 

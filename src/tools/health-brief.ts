@@ -85,12 +85,16 @@ function summarizeScan(tasks: ScheduledTask[], now: number) {
     }
   }).filter((hours) => Number.isFinite(hours) && hours > 0);
   const intervalHours = intervals.length ? Math.min(...intervals) : null;
-  const lastRunAt = scan.LastExecutionResult?.EndTimeUtc ?? null;
+  const lastResult = scan.LastExecutionResult;
+  const lastRunAt = lastResult?.EndTimeUtc ?? null;
   const lastRun = timestamp(lastRunAt);
+  const overdueByInterval = lastRun === null || intervalHours === null
+    ? null
+    : now - lastRun > intervalHours * MS_PER_HOUR;
   return {
     lastRunAt,
     intervalHours,
-    overdue: lastRun === null || intervalHours === null ? null : now - lastRun > intervalHours * MS_PER_HOUR,
+    overdue: lastResult != null && lastResult.Status !== "Completed" ? true : overdueByInterval,
   };
 }
 
@@ -187,10 +191,10 @@ async function summarizeActivity(client: JellyfinClient, minDate: string, maxDat
   const counts = new Map<string, number>();
   const clusters = new Map<string, { type: string; itemId: string | null; count: number; lastAt: string }>();
   let startIndex = 0;
-  let total: number | undefined;
+  let total: number;
   do {
     const page = await client.getActivityLog({ startIndex, limit: 200, minDate, maxDate });
-    total ??= page.TotalRecordCount;
+    total = page.TotalRecordCount;
     if (!Number.isSafeInteger(total) || total < 0 || (startIndex < total && !page.Items.length)) {
       throw new Error("Incomplete Jellyfin activity log");
     }

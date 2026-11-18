@@ -131,7 +131,7 @@ Playback controls, messages, account creation, user-data changes, and playlist o
 - `jellyfin_get_status` - server name, version, OS, pending restart, update availability
 - `jellyfin_health_brief` - daily counts for server, sessions, tasks, storage, plugins, activity, and library scan freshness. Returns at most three exceptions per section and reports failed sources as `"unknown"`. Available in HTTP `observe` mode.
   - `windowHours` defaults to 24 and accepts 1-168. Storage warns below `minFreePercent` (15 by default) or `minFreeGb` (50 decimal GB by default).
-  - Scan freshness uses the `RefreshLibrary` task and its shortest recurring trigger interval. A missing scan history or recurring trigger leaves `overdue` unknown (`null`).
+  - Scan freshness flags an unsuccessful `RefreshLibrary` result as overdue. For a completed result, it uses the shortest recurring trigger interval. Without scan history, a usable completion time, or a recurring trigger, `overdue` is unknown (`null`).
 - `jellyfin_list_plugins` - installed plugin counts by status and summaries for non-Active plugins. Set `includeDetails: true` for all plugins with versions, descriptions, and uninstallability.
 - `jellyfin_restart_server` - restart the Jellyfin process *(requires `confirm: true`)*
 - `jellyfin_shutdown_server` - stop the Jellyfin process *(requires `confirm: true`)*
