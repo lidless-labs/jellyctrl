@@ -147,13 +147,15 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_pause_session",
-    "Pause playback on a specific session. Get session IDs from jellyfin_list_sessions.",
+    "Pause playback on a specific session. Get session IDs from jellyfin_list_sessions. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       sessionId: z.string().describe("Session ID from jellyfin_list_sessions"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ sessionId }) =>
+    toToolHandler(({ confirm, sessionId }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("pause session");
         yield* fromPromise(() => client.pauseSession(sessionId));
         return ok({ result: `paused session ${sessionId}` });
       })),
@@ -162,13 +164,15 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_resume_session",
-    "Resume (unpause) playback on a specific session.",
+    "Resume (unpause) playback on a specific session. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       sessionId: z.string().describe("Session ID from jellyfin_list_sessions"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ sessionId }) =>
+    toToolHandler(({ confirm, sessionId }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("resume session");
         yield* fromPromise(() => client.resumeSession(sessionId));
         return ok({ result: `resumed session ${sessionId}` });
       })),
@@ -195,8 +199,9 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
   );
   server.tool(
     "jellyfin_send_message_to_session",
-    "Send a text message to a Jellyfin client session. Shows as a toast/dialog on the user's device.",
+    "Send a text message to a Jellyfin client session. Shows as a toast/dialog on the user's device. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       sessionId: z.string().describe("Session ID from jellyfin_list_sessions"),
       text: z.string().min(1).describe("Message body"),
       header: z.string().optional().describe("Optional header/title for the message"),
@@ -209,8 +214,9 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
         .describe("How long the message stays on screen (milliseconds)"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ sessionId, text, header, timeoutMs }) =>
+    toToolHandler(({ confirm, sessionId, text, header, timeoutMs }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("send message to session");
         yield* fromPromise(() => client.sendMessage(sessionId, text, header, timeoutMs));
         return ok({ result: `message sent to session ${sessionId}` });
       })),
@@ -219,14 +225,16 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_seek_session",
-    "Seek the active item on a session to a specific position in seconds.",
+    "Seek the active item on a session to a specific position in seconds. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       sessionId: z.string().describe("Session ID from jellyfin_list_sessions"),
       positionSec: z.number().nonnegative().describe("Target position in seconds from start"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ sessionId, positionSec }) =>
+    toToolHandler(({ confirm, sessionId, positionSec }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("seek session");
         yield* fromPromise(() => client.seekSession(sessionId, positionSec));
         return ok({ result: `seeked session ${sessionId} to ${positionSec}s` });
       })),
@@ -235,11 +243,15 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_next_track",
-    "Advance to the next track/episode in the session's queue.",
-    { sessionId: z.string().describe("Session ID from jellyfin_list_sessions") },
+    "Advance to the next track/episode in the session's queue. Requires confirm: true.",
+    {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
+      sessionId: z.string().describe("Session ID from jellyfin_list_sessions"),
+    },
     NON_DESTRUCTIVE,
-    toToolHandler(({ sessionId }) =>
+    toToolHandler(({ confirm, sessionId }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("next track");
         yield* fromPromise(() => client.nextTrack(sessionId));
         return ok({ result: `next track on session ${sessionId}` });
       })),
@@ -248,11 +260,15 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_previous_track",
-    "Go back to the previous track/episode in the session's queue.",
-    { sessionId: z.string().describe("Session ID from jellyfin_list_sessions") },
+    "Go back to the previous track/episode in the session's queue. Requires confirm: true.",
+    {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
+      sessionId: z.string().describe("Session ID from jellyfin_list_sessions"),
+    },
     NON_DESTRUCTIVE,
-    toToolHandler(({ sessionId }) =>
+    toToolHandler(({ confirm, sessionId }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("previous track");
         yield* fromPromise(() => client.previousTrack(sessionId));
         return ok({ result: `previous track on session ${sessionId}` });
       })),
@@ -261,14 +277,16 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_set_volume",
-    "Set the playback volume on a session (0-100). Note: only supported by clients that implement the SetVolume general command (most web/desktop/mobile, not all DLNA).",
+    "Set the playback volume on a session (0-100). Note: only supported by clients that implement the SetVolume general command (most web/desktop/mobile, not all DLNA). Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       sessionId: z.string().describe("Session ID from jellyfin_list_sessions"),
       volume: z.number().int().min(0).max(100).describe("Volume level 0-100"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ sessionId, volume }) =>
+    toToolHandler(({ confirm, sessionId, volume }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("set volume");
         yield* fromPromise(() => client.sendVolume(sessionId, volume));
         return ok({ result: `volume on session ${sessionId} set to ${volume}` });
       })),
@@ -277,14 +295,16 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_set_mute",
-    "Mute, unmute, or toggle mute on a session.",
+    "Mute, unmute, or toggle mute on a session. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       sessionId: z.string().describe("Session ID from jellyfin_list_sessions"),
       action: z.enum(["mute", "unmute", "toggle"]).describe("Mute action to send"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ sessionId, action }) =>
+    toToolHandler(({ confirm, sessionId, action }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("set mute");
         const cmd = action === "mute" ? "Mute" : action === "unmute" ? "Unmute" : "ToggleMute";
         yield* fromPromise(() => client.sendMuteCommand(sessionId, cmd));
         return ok({ result: `${action} sent to session ${sessionId}` });
@@ -294,14 +314,16 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_set_audio_stream",
-    "Switch the active audio track on a session by stream index. Get valid indices from the item's MediaStreams.",
+    "Switch the active audio track on a session by stream index. Get valid indices from the item's MediaStreams. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       sessionId: z.string().describe("Session ID from jellyfin_list_sessions"),
       index: z.number().int().min(0).describe("Audio stream index"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ sessionId, index }) =>
+    toToolHandler(({ confirm, sessionId, index }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("set audio stream");
         yield* fromPromise(() => client.setAudioStream(sessionId, index));
         return ok({ result: `audio stream set to index ${index} on session ${sessionId}` });
       })),
@@ -310,14 +332,16 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_set_subtitle_stream",
-    "Switch the active subtitle track on a session by stream index. Use -1 to disable subtitles.",
+    "Switch the active subtitle track on a session by stream index. Use -1 to disable subtitles. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       sessionId: z.string().describe("Session ID from jellyfin_list_sessions"),
       index: z.number().int().min(-1).describe("Subtitle stream index (-1 to disable)"),
     },
     NON_DESTRUCTIVE,
-    toToolHandler(({ sessionId, index }) =>
+    toToolHandler(({ confirm, sessionId, index }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("set subtitle stream");
         yield* fromPromise(() => client.setSubtitleStream(sessionId, index));
         return ok({ result: `subtitle stream set to index ${index} on session ${sessionId}` });
       })),
@@ -326,8 +350,9 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
 
   server.tool(
     "jellyfin_play_on_session",
-    "Tell a session to play one or more items (cast/remote-play). Use playCommand=PlayNow to start immediately, PlayNext to queue after current, or PlayLast to queue at the end.",
+    "Tell a session to play one or more items (cast/remote-play). Use playCommand=PlayNow to start immediately, PlayNext to queue after current, or PlayLast to queue at the end. Requires confirm: true.",
     {
+      confirm: z.boolean().optional().describe("Must be true to proceed."),
       sessionId: z.string().describe("Target session from jellyfin_list_sessions"),
       itemIds: z.array(z.string().min(1)).min(1).describe("Item IDs to play (in order)"),
       playCommand: z
@@ -340,9 +365,10 @@ export function registerSessionTools(server: McpServer, client: JellyfinClient):
         .optional()
         .describe("Optional start offset in seconds (only meaningful with PlayNow)"),
     },
-    NON_DESTRUCTIVE,
-    toToolHandler(({ sessionId, itemIds, playCommand, startPositionSec }) =>
+    DESTRUCTIVE,
+    toToolHandler(({ confirm, sessionId, itemIds, playCommand, startPositionSec }) =>
       toolResult(Effect.gen(function* () {
+        if (confirm !== true) return refuseUnconfirmed("play on session");
         yield* fromPromise(() =>
           client.playOnSession(sessionId, itemIds, playCommand, startPositionSec),
         );

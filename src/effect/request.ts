@@ -38,7 +38,8 @@ export const fetchWithTimeout = ({
     ({ timeoutId }) => Effect.sync(() => clearTimeout(timeoutId)),
   );
 
-export const mapHttpError = (path: string, response: Response, body: string) => {
+export const mapHttpError = (requestPath: string, response: Response) => {
+  const path = requestPath.split("?")[0];
   const messages: Record<number, string> = {
     401: "Invalid API key or unauthorized access",
     403: "Forbidden - API key lacks permission for this operation",
@@ -49,7 +50,6 @@ export const mapHttpError = (path: string, response: Response, body: string) => 
   return new JellyfinHttpError({
     path,
     status: response.status,
-    body,
     summary,
   });
 };

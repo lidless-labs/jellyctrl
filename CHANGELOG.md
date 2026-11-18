@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Upstream Jellyfin JSON reads are bounded at 2 MiB. Request diagnostics
+  omit response bodies and query values.
+- `jellyfin_mark_played`, `jellyfin_mark_unplayed`, and `jellyfin_unset_favorite`
+  carry destructive annotations because they remove user state.
+- `jellyfin_play_on_session` carries a destructive annotation because it can
+  interrupt playback.
+- Production dependency patches are refreshed, and the audit gate checks high
+  and critical advisories in direct and transitive runtime dependencies.
 - Continue Watching clears run at most four operations concurrently, preserve
   selection order, and report all successes and failures.
 - `JELLYFIN_TIMEOUT` values outside the 1 to 2147483647 millisecond timer range
@@ -60,6 +68,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `jellyfin_get_activity_log` supports pagination, date and user filters, severity,
   type, name, and sorting, and returns page offsets and item IDs. Client activity
   requests are capped at 200 entries.
+- Routine playback commands, messages, account creation, played/favorite
+  changes, and additive playlist or collection updates now require `confirm: true`.
+- Playlist item reads return one page per call. Optional `limit` defaults to 100
+  (maximum 100), and `startIndex` defaults to 0. MCP results include `startIndex`,
+  `totalCount`, and per-item `playlistEntryId`. CLI `playlist` accepts `--limit`
+  and `--start-index` for later pages.
 - `jellyfin_get_item` requires `userId`, and CLI `jellyctrl item <itemId>`
   requires `--user <id>` for user-scoped item visibility and state.
 - README rewritten to the adoption-upgrade standard: a what / why / how-it-differs

@@ -43,8 +43,9 @@ Report the actual result. Paste failures verbatim. Never claim success you did n
 - Adding or changing a tool? Type its input with a Zod schema and return
   through `ok`, `fail`, or `refuseUnconfirmed` from `src/tools/_util.ts`. Do
   not hand-build result objects.
-- Adding a destructive or privileged operation? Require explicit
-  `confirm: true` and return `refuseUnconfirmed` when it is missing.
+- Adding or changing a mutating operation? Require explicit `confirm: true`
+  and return `refuseUnconfirmed` when it is missing. Set `destructiveHint: true`
+  only for destructive or disruptive effects.
 - When behavior depends on watched, resume, favorite, or visibility state,
   prefer user-scoped Jellyfin APIs over global ones.
 - When updating a subset of Jellyfin user data, preserve the existing fields

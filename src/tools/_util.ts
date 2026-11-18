@@ -38,7 +38,7 @@ export function fail(error: unknown): ToolResult {
   };
 }
 
-// Returned by destructive tools when confirm: true was not passed. Surfaces
+// Returned by confirmation-gated tools when confirm: true was not passed. Surfaces
 // as an isError result so MCP clients see it as a refusal, not a success.
 export function refuseUnconfirmed(action: string): ToolResult {
   return fail(
