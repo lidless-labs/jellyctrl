@@ -67,7 +67,7 @@ describe("system tools", () => {
         SystemArchitecture: "X64",
         LocalAddress: "http://192.0.2.10:8096",
         HasPendingRestart: true,
-        HasUpdateAvailable: true,
+        HasUpdateAvailable: false,
         WebPath: "/ignored",
       });
       const call = setup({ getSystemInfo });
@@ -84,11 +84,11 @@ describe("system tools", () => {
         architecture: "X64",
         localAddress: "http://192.0.2.10:8096",
         hasPendingRestart: true,
-        hasUpdateAvailable: true,
+        hasUpdateAvailable: false,
       });
     });
 
-    it("defaults absent optional fields to null and false", async () => {
+    it("returns null for absent optional fields", async () => {
       const call = setup({
         getSystemInfo: vi.fn().mockResolvedValue({ ServerName: "s", Version: "1", Id: "i" }),
       });
@@ -100,8 +100,8 @@ describe("system tools", () => {
         os: null,
         architecture: null,
         localAddress: null,
-        hasPendingRestart: false,
-        hasUpdateAvailable: false,
+        hasPendingRestart: null,
+        hasUpdateAvailable: null,
       });
     });
   });

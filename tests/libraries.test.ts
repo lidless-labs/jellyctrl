@@ -96,24 +96,24 @@ describe("library tools", () => {
   });
 
   describe("jellyfin_scan_library", () => {
-    it("scans one library and forwards its id", async () => {
+    it("queues a scoped refresh without confirmation", async () => {
       const scanLibraries = vi.fn().mockResolvedValue(undefined);
       const call = setup({ scanLibraries });
 
-      const result = await call("jellyfin_scan_library", { confirm: true, libraryId: "lib-1" });
+      const result = await call("jellyfin_scan_library", { libraryId: "lib-1" });
 
       expect(scanLibraries).toHaveBeenCalledExactlyOnceWith("lib-1");
-      expect(parseResult(result)).toEqual({ result: "scan triggered for library lib-1" });
+      expect(parseResult(result)).toEqual({ result: "scan queued for library lib-1" });
     });
 
-    it("scans all libraries when libraryId is omitted", async () => {
+    it("queues a confirmed full scan when libraryId is omitted", async () => {
       const scanLibraries = vi.fn().mockResolvedValue(undefined);
       const call = setup({ scanLibraries });
 
       const result = await call("jellyfin_scan_library", { confirm: true });
 
       expect(scanLibraries).toHaveBeenCalledExactlyOnceWith(undefined);
-      expect(parseResult(result)).toEqual({ result: "scan triggered for all libraries" });
+      expect(parseResult(result)).toEqual({ result: "scan queued for all libraries" });
     });
   });
 

@@ -183,6 +183,8 @@ describe("run", () => {
     const text = out.join("\n");
     expect(text).toContain("serverName: Home");
     expect(text).toContain("version: 10.9.11");
+    expect(text).toContain("hasPendingRestart: unknown");
+    expect(text).toContain("hasUpdateAvailable: unknown");
   });
 
   it("exits 1 when status reports no version (unhealthy)", async () => {

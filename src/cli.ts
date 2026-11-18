@@ -297,8 +297,8 @@ function renderStatus(s: SystemInfo): string {
     `os: ${s.OperatingSystemDisplayName ?? "(unknown)"}`,
     `architecture: ${s.SystemArchitecture ?? "(unknown)"}`,
     `localAddress: ${s.LocalAddress ?? "(unknown)"}`,
-    `hasPendingRestart: ${s.HasPendingRestart ?? false}`,
-    `hasUpdateAvailable: ${s.HasUpdateAvailable ?? false}`,
+    `hasPendingRestart: ${s.HasPendingRestart ?? "unknown"}`,
+    `hasUpdateAvailable: ${s.HasUpdateAvailable ?? "unknown"}`,
   ].join("\n");
 }
 

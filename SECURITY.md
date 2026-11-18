@@ -20,12 +20,13 @@ You should get an acknowledgment within 72 hours. If you do not, please follow u
 - Argument-injection or path-traversal flaws in how tool inputs are forwarded to the Jellyfin API.
 - Leaks of secrets, API keys, Quick Connect codes, or upstream Jellyfin response bodies into tool results, model context, or logs.
 - A destructive or privileged tool (`jellyfin_restart_server`, `jellyfin_shutdown_server`, `jellyfin_delete_user`, `jellyfin_set_user_password`, `jellyfin_quick_connect_authorize`, the Continue Watching clears, bulk session controls, resume-position writes) executing without the documented `confirm: true` gate.
+- HTTP tool discovery or execution that exceeds the policy assigned to the caller's bearer token.
 - `JELLYFIN_VERIFY_SSL=false` affecting TLS validation for any outbound request other than the configured Jellyfin connection.
 
 ## Known and documented behavior (not a vulnerability)
 
 - `jellyfin_set_user_password` takes the new password as plaintext tool input. That value transits the LLM conversation, the model provider's request logs, and any saved transcript. This is documented in the README and the tool description. Treat any password set this way as exposed and rotate it.
-- Anyone who can reach this server with a valid `JELLYFIN_API_KEY` can perform whatever that key authorizes. The MCP server does not add its own access control beyond the `confirm: true` gates. Scope the API key appropriately.
+- Direct access to Jellyfin with a valid `JELLYFIN_API_KEY` carries the privileges of that key. The MCP HTTP listener uses separate bearer credentials and enforces the assigned tool policy on each request. The stdio transport relies on local process access and tool confirmation.
 
 ## Out of scope
 

@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `jellyfin_health_brief` and `jellyctrl health-brief` summarize seven daily
   health sections with counts, bounded exceptions, and partial results.
+- HTTP bearer tokens can be scoped to read, routine, or high-impact access.
+  Each request uses its token's policy for tool discovery and calls, including
+  batches. The legacy token still uses `JELLYFIN_MCP_REMOTE_MODE`.
 
 ### Changed
 
@@ -27,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `jellyfin_scan_library` requires confirmation for a full scan and queues a
+  scoped refresh when given a valid library ID.
+- Missing restart and update flags mean unknown. `jellyfin_get_status` returns
+  `null` for these flags, and `jellyctrl status` prints `unknown` in text output.
 - Upstream Jellyfin JSON reads are bounded at 2 MiB. Request diagnostics
   omit response bodies and query values.
 - `jellyfin_mark_played`, `jellyfin_mark_unplayed`, and `jellyfin_unset_favorite`

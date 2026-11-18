@@ -262,10 +262,29 @@ export class JellyfinClient {
   }
 
   async scanLibraries(libraryId?: string): Promise<void> {
-    const path = libraryId
-      ? `/Library/Refresh?libraryId=${encodeURIComponent(libraryId)}`
-      : "/Library/Refresh";
-    await this.request(path, { method: "POST" }, false);
+    if (libraryId === undefined) {
+      await this.request("/Library/Refresh", { method: "POST" }, false);
+      return;
+    }
+
+    const libraries = await this.listLibraries();
+    const normalizedId = libraryId.toLowerCase();
+    const library = libraries.find((entry) => entry.ItemId?.toLowerCase() === normalizedId);
+    if (!libraryId || !library) {
+      throw new Error("Unknown library ID. Use an ID from jellyfin_list_libraries.");
+    }
+
+    const params = new URLSearchParams({
+      metadataRefreshMode: "Default",
+      imageRefreshMode: "Default",
+      replaceAllMetadata: "false",
+      replaceAllImages: "false",
+    });
+    await this.request(
+      `/Items/${encodeURIComponent(library.ItemId)}/Refresh?${params}`,
+      { method: "POST" },
+      false,
+    );
   }
 
   // ── Users ─────────────────────────────────────────────────────────────────
