@@ -2,9 +2,11 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { isJSONRPCRequest, isJSONRPCResultResponse } from "@modelcontextprotocol/sdk/types.js";
 import {
   getConfig,
   getHttpConfig,
+  MIN_HTTP_TOKEN_LENGTH,
   type HttpConfig,
   type JellyfinConfig,
   type RemoteMode,
@@ -81,8 +83,8 @@ export const TOOL_REMOTE_POLICIES: Record<string, ToolPolicy> = {
 };
 
 export function isToolAllowed(mode: RemoteMode, name: string): boolean {
+  if (!Object.hasOwn(TOOL_REMOTE_POLICIES, name)) return false;
   const policy = TOOL_REMOTE_POLICIES[name];
-  if (policy === undefined) return false;
   if (mode === "full") return true;
   if (mode === "managed") return policy !== "high-impact";
   return policy === "read";
@@ -111,12 +113,55 @@ function validOrigin(value: string | undefined): boolean {
   }
 }
 
-function tokenMatches(authorization: string | undefined, token: string): boolean {
+interface TokenPolicy {
+  digest: Buffer;
+  mode: RemoteMode;
+}
+
+function tokenDigest(token: string): Buffer {
+  return createHash("sha256").update(token).digest();
+}
+
+function loadTokenPolicies(config: HttpConfig, apiKey: string): TokenPolicy[] {
+  const { token, remoteMode, scopedTokens } = config;
+  const entries: [RemoteMode, string | undefined][] = [
+    [remoteMode, token],
+    ["observe", scopedTokens?.observe],
+    ["managed", scopedTokens?.managed],
+    ["full", scopedTokens?.full],
+  ];
+  const policies: TokenPolicy[] = [];
+  const apiKeyDigest = tokenDigest(apiKey);
+  for (const [mode, value] of entries) {
+    if (value === undefined) continue;
+    const trimmed = value.trim();
+    if (!trimmed) throw new Error("HTTP bearer tokens must not be blank");
+    if (trimmed.length < MIN_HTTP_TOKEN_LENGTH) {
+      throw new Error(`HTTP bearer tokens must be at least ${MIN_HTTP_TOKEN_LENGTH} characters`);
+    }
+    const digest = tokenDigest(trimmed);
+    if (timingSafeEqual(digest, apiKeyDigest)) {
+      throw new Error("HTTP bearer tokens must differ from JELLYFIN_API_KEY");
+    }
+    if (policies.some((policy) => timingSafeEqual(digest, policy.digest))) {
+      throw new Error("HTTP bearer tokens must have distinct values");
+    }
+    policies.push({ digest, mode });
+  }
+  if (policies.length === 0) throw new Error("At least one HTTP bearer token is required");
+  return policies;
+}
+
+function resolveTokenMode(authorization: string | undefined, policies: TokenPolicy[]): RemoteMode | undefined {
   const value = authorization?.match(/^Bearer (.+)$/i)?.[1];
-  if (!value) return false;
-  const expected = createHash("sha256").update(token).digest();
-  const actual = createHash("sha256").update(value).digest();
-  return timingSafeEqual(expected, actual);
+  if (!value) return undefined;
+  const actual = tokenDigest(value);
+  let mode: RemoteMode | undefined;
+  // Compare fixed-length digests and visit every entry even after a match.
+  for (const policy of policies) {
+    if (timingSafeEqual(policy.digest, actual)) mode = policy.mode;
+  }
+  return mode;
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
@@ -152,15 +197,6 @@ function originFormPath(target: string | undefined): string | undefined {
   }
 }
 
-function assertIndependentHttpToken(config: HttpConfig, jellyfinConfig: JellyfinConfig): void {
-  if (config.token.trim().length === 0) {
-    throw new Error("JELLYFIN_MCP_HTTP_TOKEN must not be blank");
-  }
-  if (config.token === jellyfinConfig.apiKey) {
-    throw new Error("JELLYFIN_MCP_HTTP_TOKEN must differ from JELLYFIN_API_KEY");
-  }
-}
-
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const length = request.headers["content-length"];
   if (typeof length === "string" && (!/^\d+$/.test(length) || Number(length) > MAX_HTTP_BODY_BYTES)) {
@@ -181,13 +217,34 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   }
 }
 
-function toolNamesFromRequest(body: unknown): string[] {
-  if (Array.isArray(body)) return body.flatMap(toolNamesFromRequest);
-  if (typeof body !== "object" || body === null) return [];
+function isDisallowedToolCall(mode: RemoteMode, body: unknown): boolean {
+  if (typeof body !== "object" || body === null) return false;
   const message = body as { method?: unknown; params?: { name?: unknown } };
-  return message.method === "tools/call" && typeof message.params?.name === "string"
-    ? [message.params.name]
-    : [];
+  return message.method === "tools/call" && typeof message.params?.name === "string" &&
+    !isToolAllowed(mode, message.params.name);
+}
+
+function policyError(id: string | number | null, disallowed: boolean) {
+  return {
+    jsonrpc: "2.0",
+    error: { code: -32001, message: disallowed ? "Tool is not permitted" : "Batch rejected by tool policy" },
+    id,
+  };
+}
+
+function createPolicyTransport(mode: RemoteMode, messages: unknown[]): StreamableHTTPServerTransport {
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  const listIds = new Set(messages.filter(isJSONRPCRequest)
+    .filter((message) => message.method === "tools/list").map((message) => message.id));
+  const send = transport.send.bind(transport);
+  transport.send = (message, options) => {
+    if (isJSONRPCResultResponse(message) && listIds.has(message.id) && Array.isArray(message.result.tools)) {
+      const tools = message.result.tools.filter((tool: { name: string }) => isToolAllowed(mode, tool.name));
+      return send({ ...message, result: { ...message.result, tools } }, options);
+    }
+    return send(message, options);
+  };
+  return transport;
 }
 
 export interface HttpServerHandle {
@@ -209,7 +266,7 @@ export function createHttpRequestHandler(
   jellyfinConfig = getConfig(),
   serverFactory: HttpServerFactory = () => createMcpServerResource(jellyfinConfig),
 ): HttpRequestHandler {
-  assertIndependentHttpToken(config, jellyfinConfig);
+  const policies = loadTokenPolicies(config, jellyfinConfig.apiKey);
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     if (!validHost(request.headers.host, config.host) || !validOrigin(request.headers.origin)) {
       sendJson(response, 403, { error: "Forbidden" });
@@ -232,7 +289,8 @@ export function createHttpRequestHandler(
       response.writeHead(405, { allow: "POST" }).end();
       return;
     }
-    if (!tokenMatches(request.headers.authorization, config.token)) {
+    const mode = resolveTokenMode(request.headers.authorization, policies);
+    if (mode === undefined) {
       sendJson(response, 401, { error: "Unauthorized" });
       return;
     }
@@ -246,13 +304,15 @@ export function createHttpRequestHandler(
       return;
     }
 
-    const toolNames = toolNamesFromRequest(body);
-    if (toolNames.some((toolName) => !isToolAllowed(config.remoteMode, toolName))) {
-      sendJson(response, 403, {
-        jsonrpc: "2.0",
-        error: { code: -32001, message: "Tool is not permitted" },
-        id: null,
-      });
+    const messages: unknown[] = Array.isArray(body) ? body : [body];
+    const denied = new Set(messages.filter((message) => isDisallowedToolCall(mode, message)));
+    if (denied.size > 0) {
+      console.warn("jellyfin-mcp HTTP denied a tool call by bearer policy");
+      const errors = messages.filter(isJSONRPCRequest)
+        .map((message) => policyError(message.id, denied.has(message)));
+      sendJson(response, 403, Array.isArray(body) && errors.length > 0
+        ? errors
+        : errors[0] ?? policyError(null, true));
       return;
     }
 
@@ -269,7 +329,7 @@ export function createHttpRequestHandler(
     }
     const server = isMcpServerResource(created) ? created.server : created;
     const dispose = isMcpServerResource(created) ? created.dispose : undefined;
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    const transport = createPolicyTransport(mode, messages);
     let closePromise: Promise<void> | undefined;
     const close = (): Promise<void> => {
       closePromise ??= Promise.allSettled([

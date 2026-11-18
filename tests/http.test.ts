@@ -23,7 +23,17 @@ const env = {
   JELLYFIN_MCP_HTTP_TOKEN: "independent-http-token-".repeat(2),
 };
 
+const readToken = "test-read-token-".repeat(3);
+const routineToken = "test-routine-token-".repeat(3);
+const fullToken = "test-full-token-".repeat(3);
 const realFetch = globalThis.fetch;
+
+function useScopedTokens(): void {
+  vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN", undefined);
+  vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_READ", readToken);
+  vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_ROUTINE", routineToken);
+  vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_HIGH_IMPACT", fullToken);
+}
 
 class FakeResponse extends EventEmitter {
   status = 0;
@@ -136,6 +146,7 @@ describe("HTTP remote tool policy", () => {
     expect(isToolAllowed("observe", "unknown_tool")).toBe(false);
     expect(isToolAllowed("managed", "unknown_tool")).toBe(false);
     expect(isToolAllowed("full", "unknown_tool")).toBe(false);
+    expect(isToolAllowed("full", "constructor")).toBe(false);
   });
 
   it("enforces observe, managed, and full modes", () => {
@@ -198,12 +209,137 @@ describe("HTTP transport", () => {
         requestInit: { headers: { authorization: `Bearer ${env.JELLYFIN_MCP_HTTP_TOKEN}` } },
       });
       await client.connect(transport);
-      expect((await client.listTools()).tools.some((tool) => tool.name === "jellyfin_get_status")).toBe(true);
+      const { tools } = await client.listTools();
+      expect(tools.some((tool) => tool.name === "jellyfin_get_status")).toBe(true);
+      expect(tools.some((tool) => tool.name === "jellyfin_shutdown_server")).toBe(false);
       expect(transport.sessionId).toBeUndefined();
     } finally {
       await client.close();
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("rejects duplicate values across the legacy and scoped modes at startup", () => {
+    vi.stubEnv("JELLYFIN_MCP_REMOTE_MODE", "full");
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_READ", `  ${env.JELLYFIN_MCP_HTTP_TOKEN}  `);
+    const message = thrownMessage(() => createHttpRequestHandler(getHttpConfig()));
+    expect(message).toMatch(/must differ|distinct/i);
+    expect(message).not.toContain(env.JELLYFIN_MCP_HTTP_TOKEN);
+  });
+
+  it("rejects a short scoped token even with a valid legacy token", () => {
+    vi.stubEnv("JELLYFIN_MCP_HTTP_TOKEN_READ", "a".repeat(31));
+    expect(() => createHttpRequestHandler(getHttpConfig())).toThrow("at least 32 characters");
+  });
+
+  it("filters lists and gates calls for each bearer on the same listener", async () => {
+    useScopedTokens();
+    const shutdown = vi.spyOn(JellyfinClient.prototype, "shutdown").mockResolvedValue();
+    const server = createServer(createHttpListener(createHttpRequestHandler(getHttpConfig())));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("No HTTP port");
+      const uri = new URL(`http://127.0.0.1:${address.port}/mcp`);
+      for (const [token, expectedPolicies] of [
+        [readToken, ["read"]],
+        [routineToken, ["read", "routine"]],
+        [fullToken, ["read", "routine", "high-impact"]],
+      ] as const) {
+        const client = new Client({ name: "http-policy-test", version: "1" });
+        try {
+          await client.connect(new StreamableHTTPClientTransport(uri, {
+            requestInit: { headers: { authorization: `Bearer ${token}` } },
+          }));
+          const { tools } = await client.listTools();
+          const expectedNames = Object.entries(TOOL_REMOTE_POLICIES)
+            .filter(([, policy]) => expectedPolicies.some((expected) => expected === policy))
+            .map(([name]) => name);
+          expect(tools.map((tool) => tool.name).sort()).toEqual(expectedNames.sort());
+          if (token === fullToken) {
+            const result = await client.callTool({
+              name: "jellyfin_shutdown_server", arguments: { confirm: true },
+            });
+            expect(result.isError).not.toBe(true);
+            expect(shutdown).toHaveBeenCalledExactlyOnceWith();
+          }
+        } finally {
+          await client.close();
+        }
+      }
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("filters an unclassified tool from a batched tools/list response", async () => {
+    useScopedTokens();
+    const handler = createHttpRequestHandler(getHttpConfig(), undefined, () => {
+      const server = new McpServer({ name: "http-policy-batch-test", version: "1" });
+      const ok = () => ({ content: [] });
+      server.tool("jellyfin_get_status", ok);
+      server.tool("unclassified_tool", ok);
+      return server;
+    });
+    const server = createServer(createHttpListener(handler));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("No HTTP port");
+      const response = await realFetch(`http://127.0.0.1:${address.port}/mcp`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${readToken}`,
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify([
+          { jsonrpc: "2.0", id: 1, method: "tools/list" },
+          { jsonrpc: "2.0", id: 2, method: "ping" },
+        ]),
+      });
+      expect(response.status).toBe(200);
+      const messages = (await response.text()).split("\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => JSON.parse(line.slice(6)));
+      expect(messages).toContainEqual({ jsonrpc: "2.0", id: 2, result: {} });
+      const listing = messages.find((message) => message.id === 1);
+      expect(listing.result.tools.map((tool: { name: string }) => tool.name)).toEqual(["jellyfin_get_status"]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("rejects a confirmed mutation or mixed batch before dispatch and never logs bearer values", async () => {
+    useScopedTokens();
+    const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const factory = vi.fn(() => new McpServer({ name: "unused", version: "1" }));
+    const handler = createHttpRequestHandler(getHttpConfig(), undefined, factory);
+    const call = {
+      jsonrpc: "2.0", id: 2, method: "tools/call",
+      params: { name: "jellyfin_pause_session", arguments: { sessionId: "s1", confirm: true } },
+    };
+    const read = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "jellyfin_get_status" } };
+    const unknown = { ...call, params: { name: readToken } };
+    for (const body of [call, [read, call], unknown]) {
+      const result = await request(handler, {
+        method: "POST", url: "/mcp", authorization: `Bearer ${readToken}`, body: JSON.stringify(body),
+      });
+      expect(result.status).toBe(403);
+      const errors = Array.isArray(body) ? JSON.parse(result.body) : [JSON.parse(result.body)];
+      expect(errors.map((response: { id: number }) => response.id)).toEqual(Array.isArray(body) ? [1, 2] : [2]);
+      expect(errors).toContainEqual({
+        jsonrpc: "2.0", id: 2, error: { code: -32001, message: "Tool is not permitted" },
+      });
+      expect(result.body).not.toContain(readToken);
+    }
+    expect(factory).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledTimes(3);
+    for (const token of [readToken, routineToken, fullToken]) {
+      expect(JSON.stringify(log.mock.calls)).not.toContain(token);
     }
   });
 

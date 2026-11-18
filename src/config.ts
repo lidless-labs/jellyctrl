@@ -15,11 +15,14 @@ export interface JellyfinConfig {
 
 export type RemoteMode = "observe" | "managed" | "full";
 
+export const MIN_HTTP_TOKEN_LENGTH = 32;
+
 export interface HttpConfig {
   host: "127.0.0.1" | "::1";
   port: number;
-  token: string;
+  token?: string;
   remoteMode: RemoteMode;
+  scopedTokens?: Partial<Record<RemoteMode, string>>;
 }
 
 const requireUrlMessage =
@@ -60,6 +63,15 @@ export function getConfig(): JellyfinConfig {
   return result.right;
 }
 
+function readHttpToken(name: string): string | undefined {
+  // Header values arrive trimmed, so compare against the trimmed secret.
+  const token = process.env[name]?.trim();
+  if (token !== undefined && token.length < MIN_HTTP_TOKEN_LENGTH) {
+    throw new Error(`${name} must be at least ${MIN_HTTP_TOKEN_LENGTH} characters (e.g. openssl rand -hex 32)`);
+  }
+  return token;
+}
+
 export function getHttpConfig(): HttpConfig {
   const host = process.env.JELLYFIN_MCP_HTTP_HOST ?? "127.0.0.1";
   if (host !== "127.0.0.1" && host !== "::1") {
@@ -71,15 +83,18 @@ export function getHttpConfig(): HttpConfig {
   }
   const port = Number(rawPort);
   if (port > 65535) throw new Error("JELLYFIN_MCP_HTTP_PORT must be an integer from 1 to 65535");
-  // Header values arrive trimmed, so compare against the trimmed secret.
-  const token = (process.env.JELLYFIN_MCP_HTTP_TOKEN ?? "").trim();
-  if (!token) {
-    throw new Error("JELLYFIN_MCP_HTTP_TOKEN environment variable is required");
+  const token = readHttpToken("JELLYFIN_MCP_HTTP_TOKEN");
+  const scopedTokens = {
+    observe: readHttpToken("JELLYFIN_MCP_HTTP_TOKEN_READ"),
+    managed: readHttpToken("JELLYFIN_MCP_HTTP_TOKEN_ROUTINE"),
+    full: readHttpToken("JELLYFIN_MCP_HTTP_TOKEN_HIGH_IMPACT"),
+  };
+  if (token === undefined && Object.values(scopedTokens).every((value) => value === undefined)) {
+    throw new Error("At least one JELLYFIN_MCP_HTTP_TOKEN or scoped HTTP token is required");
   }
-  if (token.length < 32) throw new Error("JELLYFIN_MCP_HTTP_TOKEN must be at least 32 characters (e.g. openssl rand -hex 32)");
   const remoteMode = process.env.JELLYFIN_MCP_REMOTE_MODE ?? "observe";
   if (remoteMode !== "observe" && remoteMode !== "managed" && remoteMode !== "full") {
     throw new Error("JELLYFIN_MCP_REMOTE_MODE must be observe, managed, or full");
   }
-  return { host, port, token, remoteMode };
+  return { host, port, token, remoteMode, scopedTokens };
 }

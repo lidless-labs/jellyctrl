@@ -93,7 +93,7 @@ Then ask your agent: *"What's playing on Jellyfin right now?"* It will call `jel
 
 The default MCP transport is stdio. Use `jellyfin-mcp-http` when an MCP client needs Streamable HTTP on the same machine, or through an authenticated proxy whose origin runs on that machine. The listener accepts MCP JSON-RPC only at `POST /mcp`, has a non-sensitive `GET /healthz` response, and binds to loopback only.
 
-Set a separate bearer token. Do not reuse `JELLYFIN_API_KEY` for this token.
+Set at least one independent bearer token. Each configured token must be distinct from the others and from `JELLYFIN_API_KEY`, and must be at least 32 characters after trimming whitespace. Clients send their assigned token as `Authorization: Bearer <token>`.
 
 ```bash
 export JELLYFIN_URL=http://192.0.2.10:8096
@@ -108,16 +108,26 @@ The HTTP listener defaults to `127.0.0.1:3000`. Its configuration is intentional
 | --- | --- | --- |
 | `JELLYFIN_MCP_HTTP_HOST` | `127.0.0.1` | Loopback bind, only `127.0.0.1` or `::1`. Wildcards are refused |
 | `JELLYFIN_MCP_HTTP_PORT` | `3000` | TCP port, an integer from 1 to 65535 |
-| `JELLYFIN_MCP_HTTP_TOKEN` | Required | Independent bearer token, at least 32 characters after trimming whitespace. Send as `Authorization: Bearer <token>` |
-| `JELLYFIN_MCP_REMOTE_MODE` | `observe` | Tool policy fixed at process startup, never changed by an MCP request |
+| `JELLYFIN_MCP_HTTP_TOKEN` | Unset | Legacy bearer token, assigned the mode in `JELLYFIN_MCP_REMOTE_MODE` |
+| `JELLYFIN_MCP_REMOTE_MODE` | `observe` | Mode for the legacy token only |
+| `JELLYFIN_MCP_HTTP_TOKEN_READ` | Unset | Bearer token assigned `observe` mode |
+| `JELLYFIN_MCP_HTTP_TOKEN_ROUTINE` | Unset | Bearer token assigned `managed` mode |
+| `JELLYFIN_MCP_HTTP_TOKEN_HIGH_IMPACT` | Unset | Bearer token assigned `full` mode |
+
+You can keep the legacy token while adding scoped tokens. For example, a rendered environment file can give read and routine clients separate credentials:
+
+```dotenv
+JELLYFIN_MCP_HTTP_TOKEN_READ=<replace-with-distinct-read-bearer-token>
+JELLYFIN_MCP_HTTP_TOKEN_ROUTINE=<replace-with-distinct-routine-bearer-token>
+```
 
 Host and Origin checks run before `/healthz` and authentication. Host must identify a loopback alias or the bound host. Origin may be absent or an exact HTTP(S) loopback origin. Invalid headers receive 403 Forbidden.
 
-Remote modes provide a second server-side control in addition to each tool's existing `confirm: true` requirement:
+The server resolves the mode from the bearer token on every MCP request. It filters `tools/list` to that mode and rejects a batch before executing any of its calls if one violates the policy. Tool confirmation still applies after authorization.
 
 - `observe` permits only read tools.
 - `managed` also permits routine media, library, session, and user-data writes.
-- `full` permits every registered tool. High-impact tools still require their existing `confirm: true` argument.
+- `full` permits reads, routine writes, and high-impact tools. High-impact tools still require their existing `confirm: true` argument.
 
 In `managed` mode, the server denies restart, shutdown, account creation or deletion, password changes, account enable or disable, scheduled-task execution, session stop or stop-all, destructive playlist or collection removal, bulk resume clearing, and Quick Connect authorization. Unknown or unclassified tools are denied in every mode.
 
