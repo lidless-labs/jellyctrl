@@ -45,7 +45,7 @@ export type Parsed =
   | { kind: "similar"; json: boolean; itemId: string; userId?: string; limit: number }
   | { kind: "history"; json: boolean; userId: string; types?: string; limit: number }
   | { kind: "user-data"; json: boolean; userId: string; itemId: string }
-  | { kind: "activity"; json: boolean; limit: number; minDate?: string }
+  | { kind: "activity"; json: boolean; limit: number; minDate?: string; includeDetails: boolean }
   | { kind: "tasks"; json: boolean }
   | { kind: "playlists"; json: boolean; userId: string }
   | { kind: "playlist"; json: boolean; playlistId: string; userId: string };
@@ -104,6 +104,7 @@ Command options:
              --limit <n>              Max results, 1-200            (default 20)
   activity   --limit <n>              Max entries, 1-200            (default 20)
              --min-date <iso>         Only entries newer than this ISO 8601 timestamp
+             --include-details        Include activity summary and detail text
 
 Environment:
   JELLYFIN_URL          Base URL (e.g. http://192.0.2.10:8096)            [required]
@@ -240,8 +241,9 @@ export function parseArgs(argv: string[]): Parsed {
     case "activity": {
       const limit = requireInt(takeOption(args, "--limit"), "--limit", 1, 200, 20);
       const minDate = takeOption(args, "--min-date");
+      const includeDetails = takeFlag(args, "--include-details");
       ensureNoExtra(args);
-      return { kind: "activity", json, limit, minDate };
+      return { kind: "activity", json, limit, minDate, includeDetails };
     }
     case "playlists": {
       const userId = requireOption(args, "--user");
@@ -356,6 +358,7 @@ function renderActivity(log: ActivityLogResponse): string {
   for (const e of log.Items) {
     lines.push(`  ${e.Date}  [${e.Severity}] ${e.Type}  ${e.Name}`);
     if (e.ShortOverview) lines.push(`    ${e.ShortOverview}`);
+    if (e.Overview && e.Overview !== e.ShortOverview) lines.push(`    ${e.Overview}`);
   }
   return lines.join("\n");
 }
@@ -526,7 +529,11 @@ function dispatch(
       }
       case "activity": {
         const r = yield* fromPromise(() => client.getActivityLog({ limit: parsed.limit, minDate: parsed.minDate }));
-        return emit(r, () => renderActivity(r), parsed.json);
+        const activity = parsed.includeDetails ? r : {
+          ...r,
+          Items: r.Items.map(({ ShortOverview: _summary, Overview: _detail, ...entry }) => entry),
+        };
+        return emit(activity, () => renderActivity(activity), parsed.json);
       }
       case "tasks": {
         const r = yield* fromPromise(() => client.listScheduledTasks());

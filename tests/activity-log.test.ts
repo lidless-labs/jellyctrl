@@ -89,7 +89,10 @@ describe("jellyfin_get_activity_log", () => {
         Name: "Example event",
       }],
     });
-    const result = await call({ startIndex: 20 });
+    const summary = parseResult(await call({ startIndex: 20 }));
+    expect(summary.entries[0]).not.toHaveProperty("summary");
+    expect(summary.entries[0]).not.toHaveProperty("detail");
+    const result = await call({ startIndex: 20, includeDetails: true });
     expect(result.isError).not.toBe(true);
     expect(parseResult(result)).toEqual({
       totalCount: 75,
@@ -157,13 +160,13 @@ describe("jellyfin_get_activity_log", () => {
     },
   );
 
-  it("declares all four accurate MCP hints for an external read", () => {
+  it("declares all four kit MCP hints for a read", () => {
     const { tool } = setup();
     expect(tool.annotations).toEqual({
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     });
   });
 });

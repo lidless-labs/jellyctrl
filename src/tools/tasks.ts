@@ -66,9 +66,10 @@ export function registerTaskTools(server: McpServer, client: JellyfinClient): vo
       name: z.string().optional().describe("Filter by activity name."),
       sortBy: z.string().optional().describe("Jellyfin activity sort field, or comma-separated fields: Name, Overiew, ShortOverview, Type, DateCreated, Username, LogSeverity."),
       sortOrder: z.enum(["Ascending", "Descending"]).optional(),
+      includeDetails: z.boolean().default(false).describe("Include activity summary and detail text."),
     },
-    { ...READ_ONLY, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    toToolHandler((options) =>
+    READ_ONLY,
+    toToolHandler(({ includeDetails, ...options }) =>
       toolResult(Effect.gen(function* () {
         const log = yield* fromPromise(() => client.getActivityLog(options));
         return ok({
@@ -82,8 +83,7 @@ export function registerTaskTools(server: McpServer, client: JellyfinClient): vo
             name: e.Name,
             userId: e.UserId ?? null,
             itemId: e.ItemId ?? null,
-            summary: e.ShortOverview ?? null,
-            detail: e.Overview ?? null,
+            ...(includeDetails ? { summary: e.ShortOverview ?? null, detail: e.Overview ?? null } : {}),
           })),
         });
       })),

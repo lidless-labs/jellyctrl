@@ -140,7 +140,7 @@ describe("scheduled task tools", () => {
             UserId: "user-1",
             ShortOverview: "from 192.0.2.5",
             Overview: "full detail",
-            ItemId: "ignored",
+            ItemId: "item-1",
           },
           { Id: 9002, Date: "2026-04-19T09:00:00Z", Severity: "Warning", Type: "System", Name: "plain" },
         ],
@@ -149,9 +149,10 @@ describe("scheduled task tools", () => {
 
       const result = await call("jellyfin_get_activity_log");
 
-      expect(getActivityLog).toHaveBeenCalledExactlyOnceWith(20, undefined);
+      expect(getActivityLog).toHaveBeenCalledExactlyOnceWith({ limit: 20, startIndex: 0 });
       expect(parseResult(result)).toEqual({
         totalCount: 57,
+        startIndex: 0,
         entries: [
           {
             id: 9001,
@@ -160,8 +161,7 @@ describe("scheduled task tools", () => {
             type: "SessionStarted",
             name: "example-user is online",
             userId: "user-1",
-            summary: "from 192.0.2.5",
-            detail: "full detail",
+            itemId: "item-1",
           },
           {
             id: 9002,
@@ -170,20 +170,19 @@ describe("scheduled task tools", () => {
             type: "System",
             name: "plain",
             userId: null,
-            summary: null,
-            detail: null,
+            itemId: null,
           },
         ],
       });
     });
 
-    it("forwards an explicit limit and minDate positionally", async () => {
+    it("forwards an explicit limit and minDate in the options object", async () => {
       const getActivityLog = vi.fn().mockResolvedValue({ TotalRecordCount: 0, Items: [] });
       const call = setup({ getActivityLog });
 
       await call("jellyfin_get_activity_log", { limit: 200, minDate: "2026-04-19T00:00:00Z" });
 
-      expect(getActivityLog).toHaveBeenCalledExactlyOnceWith(200, "2026-04-19T00:00:00Z");
+      expect(getActivityLog).toHaveBeenCalledExactlyOnceWith({ limit: 200, startIndex: 0, minDate: "2026-04-19T00:00:00Z" });
     });
 
     it("returns zero entries for an empty log", async () => {
@@ -193,6 +192,7 @@ describe("scheduled task tools", () => {
 
       expect(parseResult(await call("jellyfin_get_activity_log"))).toEqual({
         totalCount: 0,
+        startIndex: 0,
         entries: [],
       });
     });
