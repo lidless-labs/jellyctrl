@@ -27,6 +27,11 @@ export const TOOL_REMOTE_POLICIES: Record<string, ToolPolicy> = {
   jellyfin_restart_server: "high-impact",
   jellyfin_shutdown_server: "high-impact",
   jellyfin_list_libraries: "read",
+  jellyfin_list_library_items: "read",
+  jellyfin_find_missing_metadata: "read",
+  jellyfin_find_duplicates: "read",
+  // Refresh can replace metadata and images, including on descendants.
+  jellyfin_refresh_item: "high-impact",
   jellyfin_scan_library: "routine",
   jellyfin_list_users: "read",
   jellyfin_get_user: "read",

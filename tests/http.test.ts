@@ -157,7 +157,7 @@ describe("HTTP transport configuration", () => {
 describe("HTTP remote tool policy", () => {
   it("classifies every registered tool exactly once", () => {
     const registered = captureRegisteredToolNames();
-    expect(registered).toHaveLength(62);
+    expect(registered).toHaveLength(66);
     expect(Object.keys(TOOL_REMOTE_POLICIES).sort()).toEqual([...registered].sort());
   });
 
@@ -276,12 +276,21 @@ describe("HTTP transport", () => {
             .filter(([, policy]) => expectedPolicies.some((expected) => expected === policy))
             .map(([name]) => name);
           expect(tools.map((tool) => tool.name).sort()).toEqual(expectedNames.sort());
+          const names = tools.map((tool) => tool.name);
+          expect(names).toEqual(expect.arrayContaining([
+            "jellyfin_list_library_items", "jellyfin_find_missing_metadata", "jellyfin_find_duplicates",
+          ]));
+          expect(names.includes("jellyfin_refresh_item")).toBe(token === fullToken);
           if (token === fullToken) {
             const result = await client.callTool({
               name: "jellyfin_shutdown_server", arguments: { confirm: true },
             });
             expect(result.isError).not.toBe(true);
             expect(shutdown).toHaveBeenCalledExactlyOnceWith();
+          } else {
+            await expect(client.callTool({
+              name: "jellyfin_refresh_item", arguments: { itemId: "item-example", confirm: true },
+            })).rejects.toMatchObject({ code: 403 });
           }
         } finally {
           await client.close();
