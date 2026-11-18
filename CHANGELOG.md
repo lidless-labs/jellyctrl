@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Library hygiene tools for compact item paging, missing metadata counts, and
+  duplicate and multi-version candidates. The read commands are also available
+  in the CLI. MCP can queue a confirmed item refresh with explicit replacement
+  options.
+
 ### Changed
 
 - Bumped `@lidless-labs/effect-operator-kit` to

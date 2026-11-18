@@ -84,6 +84,22 @@ async function readBoundedBody(response: Response, controller: AbortController):
   }
 }
 
+interface LibraryItemsPageOptions {
+  startIndex: number;
+  limit: number;
+  includeItemTypes?: string[];
+  fields?: string[];
+  includePrimaryImage?: boolean;
+  missingOverviewItemIds?: string[];
+}
+
+interface ItemRefreshParameters {
+  metadataRefreshMode: "FullRefresh";
+  imageRefreshMode: "FullRefresh";
+  replaceAllMetadata: boolean;
+  replaceAllImages: boolean;
+}
+
 export class JellyfinClient {
   private baseUrl: string;
   private timeout: number;
@@ -254,6 +270,62 @@ export class JellyfinClient {
   // ── Libraries ─────────────────────────────────────────────────────────────
   async listLibraries(): Promise<Library[]> {
     return this.request<Library[]>("/Library/VirtualFolders");
+  }
+
+  async listLibraryItems(libraryId: string, options: LibraryItemsPageOptions): Promise<ItemsResponse> {
+    const { limit, startIndex, includeItemTypes, fields, includePrimaryImage, missingOverviewItemIds } = options;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200
+      || !Number.isInteger(startIndex) || startIndex < 0 || startIndex > 2_147_483_647) {
+      throw new Error("Invalid library page bounds.");
+    }
+    const params = new URLSearchParams({
+      parentId: libraryId,
+      recursive: "true",
+      sortBy: "SortName,DateCreated",
+      sortOrder: "Ascending",
+      startIndex: String(startIndex),
+      limit: String(limit),
+      enableTotalRecordCount: "true",
+      enableUserData: "false",
+      enableImages: String(includePrimaryImage ?? false),
+    });
+    if (includeItemTypes?.length) params.set("includeItemTypes", includeItemTypes.join(","));
+    if (fields?.length) params.set("fields", fields.join(","));
+    if (includePrimaryImage) params.set("enableImageTypes", "Primary");
+    if (missingOverviewItemIds?.length) {
+      params.set("ids", missingOverviewItemIds.join(","));
+      params.set("hasOverview", "false");
+    }
+    return this.request<ItemsResponse>(`/Items?${params}`);
+  }
+
+  async refreshItem(
+    itemId: string,
+    options: { replaceAllMetadata: boolean; replaceAllImages: boolean; recursive?: boolean },
+  ): Promise<ItemRefreshParameters> {
+    const path = `/Items/${encodeURIComponent(itemId)}`;
+    const item = await this.request<Item>(path);
+    // Jellyfin chooses whether to refresh descendants based on item type.
+    const refreshesDescendants = item.IsFolder === true || item.Type === "MusicArtist";
+    if (options.recursive !== undefined && options.recursive !== refreshesDescendants) {
+      throw new Error(
+        "Jellyfin controls recursion by item type. Omit recursive to use Jellyfin's built-in behavior.",
+      );
+    }
+    const parameters: ItemRefreshParameters = {
+      metadataRefreshMode: "FullRefresh",
+      imageRefreshMode: "FullRefresh",
+      replaceAllMetadata: options.replaceAllMetadata,
+      replaceAllImages: options.replaceAllImages,
+    };
+    const query = new URLSearchParams({
+      metadataRefreshMode: parameters.metadataRefreshMode,
+      imageRefreshMode: parameters.imageRefreshMode,
+      replaceAllMetadata: String(parameters.replaceAllMetadata),
+      replaceAllImages: String(parameters.replaceAllImages),
+    });
+    await this.request(`${path}/Refresh?${query}`, { method: "POST" }, false);
+    return parameters;
   }
 
   async scanLibraries(libraryId?: string): Promise<void> {

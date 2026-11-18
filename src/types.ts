@@ -104,6 +104,12 @@ export interface Item {
   SeriesId?: string;
   ProductionYear?: number;
   DateCreated?: string;
+  Path?: string | null;
+  Overview?: string | null;
+  ProviderIds?: Record<string, string | null> | null;
+  ImageTags?: Record<string, string | null> | null;
+  MediaSourceCount?: number | null;
+  IsFolder?: boolean | null;
   RunTimeTicks?: number;
   // Episode-specific: season (ParentIndexNumber) and episode (IndexNumber).
   ParentIndexNumber?: number;
