@@ -25,15 +25,29 @@ export interface Library {
 export interface UserPolicy {
   IsAdministrator?: boolean;
   IsDisabled?: boolean;
+  IsHidden?: boolean;
+  EnableRemoteAccess?: boolean;
+  EnableMediaPlayback?: boolean;
+  EnableContentDeletion?: boolean;
+  EnableContentDownloading?: boolean;
+  EnableRemoteControlOfOtherUsers?: boolean;
+  EnablePublicSharing?: boolean;
+  EnableAllFolders?: boolean;
+  EnabledFolders?: string[] | null;
+  LoginAttemptsBeforeLockout?: number;
+  InvalidLoginAttemptCount?: number;
+  MaxActiveSessions?: number;
+  AuthenticationProviderId?: string;
   [key: string]: unknown;
 }
 
 export interface User {
-  Id: string;
-  Name: string;
-  LastLoginDate?: string;
-  LastActivityDate?: string;
-  Policy?: UserPolicy;
+  Id?: string;
+  Name?: string | null;
+  HasPassword?: boolean | null;
+  LastLoginDate?: string | null;
+  LastActivityDate?: string | null;
+  Policy?: UserPolicy | null;
   [key: string]: unknown;
 }
 
